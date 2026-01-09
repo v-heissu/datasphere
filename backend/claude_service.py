@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any, List
 
 import anthropic
 
-from config import CLAUDE_API_KEY, CLAUDE_MODEL, DASHBOARD_URL
+from config import CLAUDE_API_KEY, CLAUDE_MODEL_CLASSIFY, CLAUDE_MODEL_PICKS, DASHBOARD_URL
 from database import (
     get_config, get_recent_items, save_item, get_pending_items_for_picks,
     get_stats_last_7_days, save_daily_picks, get_item_by_id
@@ -159,10 +159,13 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
             verbatim_input=verbatim
         )
 
-        # Call Claude for classification
+        # Call Claude Sonnet with web_search for classification
         response = client.messages.create(
-            model=CLAUDE_MODEL,
+            model=CLAUDE_MODEL_CLASSIFY,
             max_tokens=2000,
+            tools=[
+                {"type": "web_search_20250305", "name": "web_search"}
+            ],
             messages=[
                 {"role": "user", "content": prompt}
             ]
@@ -288,8 +291,9 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
             recent_captured=recent_stats['captured']
         )
 
+        # Use Haiku for daily picks (faster and cheaper)
         response = client.messages.create(
-            model=CLAUDE_MODEL,
+            model=CLAUDE_MODEL_PICKS,
             max_tokens=1500,
             messages=[
                 {"role": "user", "content": prompt}
