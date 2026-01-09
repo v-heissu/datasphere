@@ -1,5 +1,5 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { RefreshCw, Settings, Brain, Inbox, CheckCircle2, Archive } from 'lucide-svelte';
 	import StatsWidget from '$lib/components/StatsWidget.svelte';
 	import ItemCard from '$lib/components/ItemCard.svelte';
@@ -9,6 +9,7 @@
 	import { items, stats, statusFilter, typeFilter, dailyPicks, loading, error } from '$lib/stores';
 
 	const itemTypes = ['film', 'book', 'concept', 'music', 'art', 'todo', 'other'];
+	const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
 
 	const typeIcons = {
 		film: '🎬',
@@ -23,10 +24,80 @@
 	let picksLoading = false;
 	let showSettings = false;
 	let toast = null;
+	let refreshInterval = null;
+	let lastRefresh = Date.now();
 
 	onMount(async () => {
 		await Promise.all([loadItems(), loadStats(), loadDailyPicks()]);
+		startAutoRefresh();
+
+		// Refresh on visibility change (tab becomes active)
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+
+		// Refresh on window focus
+		window.addEventListener('focus', handleWindowFocus);
 	});
+
+	onDestroy(() => {
+		stopAutoRefresh();
+		if (typeof document !== 'undefined') {
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+		}
+		if (typeof window !== 'undefined') {
+			window.removeEventListener('focus', handleWindowFocus);
+		}
+	});
+
+	function startAutoRefresh() {
+		stopAutoRefresh();
+		refreshInterval = setInterval(() => {
+			if (!document.hidden && !$loading) {
+				silentRefresh();
+			}
+		}, AUTO_REFRESH_INTERVAL);
+	}
+
+	function stopAutoRefresh() {
+		if (refreshInterval) {
+			clearInterval(refreshInterval);
+			refreshInterval = null;
+		}
+	}
+
+	function handleVisibilityChange() {
+		if (!document.hidden) {
+			// Tab became visible - refresh if more than 10 seconds since last refresh
+			const timeSinceRefresh = Date.now() - lastRefresh;
+			if (timeSinceRefresh > 10000) {
+				silentRefresh();
+			}
+		}
+	}
+
+	function handleWindowFocus() {
+		// Refresh if more than 10 seconds since last refresh
+		const timeSinceRefresh = Date.now() - lastRefresh;
+		if (timeSinceRefresh > 10000 && !$loading) {
+			silentRefresh();
+		}
+	}
+
+	async function silentRefresh() {
+		// Refresh without showing loading state (background refresh)
+		lastRefresh = Date.now();
+		try {
+			const [newItems, newStats, newPicks] = await Promise.all([
+				getItems($statusFilter, $typeFilter),
+				getStats(),
+				getDailyPicks()
+			]);
+			$items = newItems;
+			$stats = newStats;
+			$dailyPicks = newPicks;
+		} catch (e) {
+			console.error('Silent refresh error:', e);
+		}
+	}
 
 	async function loadItems() {
 		$loading = true;
