@@ -15,6 +15,16 @@ services:
       - DECAY_DAYS=${DECAY_DAYS:-30}
       - NOTIFICATION_ENABLED=${NOTIFICATION_ENABLED:-true}
       - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:8000}
+      # Email settings (Gmail SMTP)
+      - EMAIL_ENABLED=${EMAIL_ENABLED:-false}
+      - EMAIL_SMTP_HOST=${EMAIL_SMTP_HOST:-smtp.gmail.com}
+      - EMAIL_SMTP_PORT=${EMAIL_SMTP_PORT:-587}
+      - EMAIL_USERNAME=${EMAIL_USERNAME}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
+      - EMAIL_FROM=${EMAIL_FROM}
+      - EMAIL_TO=${EMAIL_TO}
+      - WEEKLY_DIGEST_TIME=${WEEKLY_DIGEST_TIME:-08:00}
+      - WEEKLY_DIGEST_DAY=${WEEKLY_DIGEST_DAY:-sat}
     volumes:
       - ./data:/data
     ports:

@@ -7,13 +7,17 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from config import DAILY_PICKS_TIME, DECAY_DAYS, NOTIFICATION_ENABLED
+from config import (
+    DAILY_PICKS_TIME, DECAY_DAYS, NOTIFICATION_ENABLED,
+    EMAIL_ENABLED, WEEKLY_DIGEST_TIME, WEEKLY_DIGEST_DAY
+)
 from database import (
     get_config, get_items_older_than, update_item_status,
     get_item_by_id
 )
 from claude_service import generate_daily_picks
 from telegram_bot import send_telegram_message
+from email_service import send_weekly_digest
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +137,30 @@ def init_scheduler():
         replace_existing=True
     )
     logger.info("Scheduled auto-archive at 02:00")
+
+    # Weekly email digest (Saturday morning by default)
+    if EMAIL_ENABLED:
+        try:
+            digest_hour, digest_minute = WEEKLY_DIGEST_TIME.split(':')
+            digest_hour = int(digest_hour)
+            digest_minute = int(digest_minute)
+        except (ValueError, AttributeError):
+            digest_hour, digest_minute = 8, 0
+
+        # Map day name to cron day_of_week
+        day_map = {
+            'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3,
+            'fri': 4, 'sat': 5, 'sun': 6
+        }
+        digest_day = day_map.get(WEEKLY_DIGEST_DAY.lower(), 5)  # Default Saturday
+
+        scheduler.add_job(
+            send_weekly_digest,
+            CronTrigger(day_of_week=digest_day, hour=digest_hour, minute=digest_minute),
+            id='weekly_digest',
+            replace_existing=True
+        )
+        logger.info(f"Scheduled weekly digest on {WEEKLY_DIGEST_DAY} at {digest_hour:02d}:{digest_minute:02d}")
 
     return scheduler
 

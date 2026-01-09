@@ -38,3 +38,14 @@ DASHBOARD_URL = os.getenv("DASHBOARD_URL", "http://localhost:8000")
 # API Settings
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
+
+# Email Settings (Gmail SMTP)
+EMAIL_ENABLED = os.getenv("EMAIL_ENABLED", "false").lower() == "true"
+EMAIL_SMTP_HOST = os.getenv("EMAIL_SMTP_HOST", "smtp.gmail.com")
+EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", "587"))
+EMAIL_USERNAME = os.getenv("EMAIL_USERNAME", "")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "")  # Use Gmail App Password
+EMAIL_FROM = os.getenv("EMAIL_FROM", "")
+EMAIL_TO = os.getenv("EMAIL_TO", "")
+WEEKLY_DIGEST_TIME = os.getenv("WEEKLY_DIGEST_TIME", "08:00")
+WEEKLY_DIGEST_DAY = os.getenv("WEEKLY_DIGEST_DAY", "sat")  # mon, tue, wed, thu, fri, sat, sun

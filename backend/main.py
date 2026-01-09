@@ -273,6 +273,26 @@ async def get_all_config_values():
     return config
 
 
+@app.post("/api/email/test")
+async def send_test_email():
+    """Send a test weekly digest email."""
+    from email_service import send_weekly_digest
+    from config import EMAIL_ENABLED
+
+    if not EMAIL_ENABLED:
+        raise HTTPException(
+            status_code=400,
+            detail="Email not enabled. Set EMAIL_ENABLED=true and configure SMTP settings."
+        )
+
+    success = await send_weekly_digest()
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to send email. Check logs.")
+
+    return {"success": True, "message": "Digest email sent!"}
+
+
 # Serve frontend static files
 import os
 frontend_build_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'build')
