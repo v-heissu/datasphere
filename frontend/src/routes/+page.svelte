@@ -121,26 +121,26 @@
 </script>
 
 <svelte:head>
-	<title>ThoughtCapture - La Tua Coda</title>
+	<title>ThoughtCapture</title>
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 </svelte:head>
 
-<main class="min-h-screen">
-	<div class="container mx-auto px-4 py-8 max-w-6xl">
+<main class="min-h-screen pb-safe">
+	<div class="container mx-auto px-3 sm:px-4 py-4 sm:py-8 max-w-6xl">
 		<!-- Header -->
-		<header class="mb-10 flex items-start justify-between">
-			<div>
-				<div class="flex items-center gap-3 mb-2">
-					<div class="p-2.5 rounded-2xl bg-gradient-to-br from-[var(--accent)] to-purple-600">
-						<Brain class="w-7 h-7 text-white" />
-					</div>
-					<h1 class="text-3xl font-bold bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
+		<header class="mb-6 sm:mb-10 flex items-center justify-between">
+			<div class="flex items-center gap-2 sm:gap-3">
+				<div class="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-gradient-to-br from-[var(--accent)] to-purple-600">
+					<Brain class="w-5 h-5 sm:w-7 sm:h-7 text-white" />
+				</div>
+				<div>
+					<h1 class="text-xl sm:text-3xl font-bold bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
 						ThoughtCapture
 					</h1>
+					<p class="text-xs sm:text-sm opacity-50 hidden sm:block">Pensieri catturati, pronti da consumare</p>
 				</div>
-				<p class="opacity-50 ml-14">Pensieri catturati, pronti da consumare</p>
 			</div>
 			<button
 				class="btn btn-ghost btn-icon"
@@ -164,39 +164,40 @@
 			/>
 		{/if}
 
-		<!-- Filters -->
-		<div class="flex flex-wrap items-center gap-3 mb-6">
-			<div class="flex gap-2">
-				<button
-					class="btn {$statusFilter === 'pending' ? 'btn-primary' : 'btn-secondary'}"
-					on:click={() => handleStatusFilter('pending')}
-				>
-					<Inbox class="w-4 h-4" />
-					In Coda
-					<span class="opacity-60">({$stats.pending})</span>
-				</button>
-
-				<button
-					class="btn {$statusFilter === 'consumed' ? 'btn-primary' : 'btn-secondary'}"
-					on:click={() => handleStatusFilter('consumed')}
-				>
-					<CheckCircle2 class="w-4 h-4" />
-					Consumati
-					<span class="opacity-60">({$stats.total_consumed})</span>
-				</button>
-
-				<button
-					class="btn {$statusFilter === 'archived' ? 'btn-primary' : 'btn-secondary'}"
-					on:click={() => handleStatusFilter('archived')}
-				>
-					<Archive class="w-4 h-4" />
-					Archiviati
-					<span class="opacity-60">({$stats.archived})</span>
-				</button>
-			</div>
+		<!-- Status Filters - Scrollable on mobile -->
+		<div class="flex items-center gap-2 mb-4 sm:mb-6 overflow-x-auto pb-2 -mx-3 px-3 sm:mx-0 sm:px-0 sm:overflow-visible sm:flex-wrap">
+			<button
+				class="btn btn-sm sm:btn {$statusFilter === 'pending' ? 'btn-primary' : 'btn-secondary'} whitespace-nowrap flex-shrink-0"
+				on:click={() => handleStatusFilter('pending')}
+			>
+				<Inbox class="w-4 h-4" />
+				<span class="hidden sm:inline">In Coda</span>
+				<span class="sm:hidden">Coda</span>
+				<span class="opacity-60">({$stats.pending})</span>
+			</button>
 
 			<button
-				class="btn btn-ghost btn-icon ml-auto"
+				class="btn btn-sm sm:btn {$statusFilter === 'consumed' ? 'btn-primary' : 'btn-secondary'} whitespace-nowrap flex-shrink-0"
+				on:click={() => handleStatusFilter('consumed')}
+			>
+				<CheckCircle2 class="w-4 h-4" />
+				<span class="hidden sm:inline">Consumati</span>
+				<span class="sm:hidden">Fatti</span>
+				<span class="opacity-60">({$stats.total_consumed})</span>
+			</button>
+
+			<button
+				class="btn btn-sm sm:btn {$statusFilter === 'archived' ? 'btn-primary' : 'btn-secondary'} whitespace-nowrap flex-shrink-0"
+				on:click={() => handleStatusFilter('archived')}
+			>
+				<Archive class="w-4 h-4" />
+				<span class="hidden sm:inline">Archiviati</span>
+				<span class="sm:hidden">Archivio</span>
+				<span class="opacity-60">({$stats.archived})</span>
+			</button>
+
+			<button
+				class="btn btn-ghost btn-icon flex-shrink-0 ml-auto"
 				on:click={loadItems}
 				disabled={$loading}
 				title="Ricarica"
@@ -205,21 +206,21 @@
 			</button>
 		</div>
 
-		<!-- Type filters -->
-		<div class="flex gap-2 mb-8 flex-wrap items-center">
-			<span class="text-sm opacity-50">Tipo:</span>
+		<!-- Type filters - Scrollable on mobile -->
+		<div class="flex gap-2 mb-6 sm:mb-8 overflow-x-auto pb-2 -mx-3 px-3 sm:mx-0 sm:px-0 sm:overflow-visible sm:flex-wrap items-center">
+			<span class="text-xs sm:text-sm opacity-50 flex-shrink-0">Tipo:</span>
 			{#each itemTypes as type}
 				<button
-					class="badge {$typeFilter === type ? 'badge-active' : ''}"
+					class="badge {$typeFilter === type ? 'badge-active' : ''} flex-shrink-0"
 					on:click={() => handleTypeFilter(type)}
 				>
 					<span class="mr-1">{typeIcons[type]}</span>
-					{type}
+					<span class="hidden sm:inline">{type}</span>
 				</button>
 			{/each}
 			{#if $typeFilter}
 				<button
-					class="text-xs opacity-40 hover:opacity-100 transition-opacity ml-2"
+					class="text-xs opacity-40 active:opacity-100 transition-opacity ml-2 flex-shrink-0 py-2"
 					on:click={() => handleTypeFilter(null)}
 				>
 					Reset
@@ -229,43 +230,43 @@
 
 		<!-- Error message -->
 		{#if $error}
-			<div class="card border-[var(--danger)]/50 bg-[var(--danger)]/10 px-4 py-3 mb-6 text-[var(--danger)]">
+			<div class="card border-[var(--danger)]/50 bg-[var(--danger)]/10 px-4 py-3 mb-6 text-[var(--danger)] text-sm">
 				{$error}
 			</div>
 		{/if}
 
 		<!-- Items grid -->
 		{#if $loading && $items.length === 0}
-			<div class="text-center py-16">
-				<RefreshCw class="w-10 h-10 animate-spin mx-auto text-[var(--accent)] opacity-50" />
-				<p class="opacity-40 mt-4">Caricamento...</p>
+			<div class="text-center py-12 sm:py-16">
+				<RefreshCw class="w-8 h-8 sm:w-10 sm:h-10 animate-spin mx-auto text-[var(--accent)] opacity-50" />
+				<p class="opacity-40 mt-4 text-sm sm:text-base">Caricamento...</p>
 			</div>
 		{:else if $items.length === 0}
-			<div class="text-center py-16">
-				<div class="w-20 h-20 rounded-full bg-[var(--bg-secondary)] flex items-center justify-center mx-auto mb-4">
+			<div class="text-center py-12 sm:py-16">
+				<div class="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[var(--bg-secondary)] flex items-center justify-center mx-auto mb-4">
 					{#if $statusFilter === 'pending'}
-						<Inbox class="w-10 h-10 opacity-20" />
+						<Inbox class="w-8 h-8 sm:w-10 sm:h-10 opacity-20" />
 					{:else if $statusFilter === 'consumed'}
-						<CheckCircle2 class="w-10 h-10 opacity-20" />
+						<CheckCircle2 class="w-8 h-8 sm:w-10 sm:h-10 opacity-20" />
 					{:else}
-						<Archive class="w-10 h-10 opacity-20" />
+						<Archive class="w-8 h-8 sm:w-10 sm:h-10 opacity-20" />
 					{/if}
 				</div>
-				<p class="opacity-50 text-lg">
+				<p class="opacity-50 text-base sm:text-lg">
 					{#if $statusFilter === 'pending'}
 						Coda vuota!
 					{:else if $statusFilter === 'consumed'}
-						Nessun item consumato ancora.
+						Nessun item consumato.
 					{:else}
 						Nessun item archiviato.
 					{/if}
 				</p>
 				{#if $statusFilter === 'pending'}
-					<p class="text-sm opacity-30 mt-2">Manda qualche pensiero su Telegram</p>
+					<p class="text-xs sm:text-sm opacity-30 mt-2">Manda qualche pensiero su Telegram</p>
 				{/if}
 			</div>
 		{:else}
-			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
 				{#each $items as item (item.id)}
 					<ItemCard {item} on:action={handleAction} />
 				{/each}
