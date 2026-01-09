@@ -142,6 +142,7 @@ REGOLE:
 <svelte:window on:keydown={handleKeydown} />
 
 {#if show}
+	<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
 	<div class="modal-backdrop animate-fade-in" on:click|self={close}>
 		<div class="modal animate-scale-in">
 			<!-- Header -->

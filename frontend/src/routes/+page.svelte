@@ -1,6 +1,6 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
-	import { RefreshCw, Settings, Brain, Inbox, CheckCircle2, Archive, LayoutGrid, List, Rows3 } from 'lucide-svelte';
+	import { RefreshCw, Settings, Brain, Inbox, CheckCircle2, Archive, LayoutGrid, List, AlignJustify } from 'lucide-svelte';
 	import StatsWidget from '$lib/components/StatsWidget.svelte';
 	import ItemCard from '$lib/components/ItemCard.svelte';
 	import ItemTable from '$lib/components/ItemTable.svelte';
@@ -293,7 +293,7 @@
 					on:click={() => viewMode = 'accordion'}
 					title="Accordion"
 				>
-					<Rows3 class="w-4 h-4" />
+					<AlignJustify class="w-4 h-4" />
 				</button>
 			</div>
 
