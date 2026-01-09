@@ -1,0 +1,16 @@
+version: '3.8'
+
+# Development override - mounts source for hot reload
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./backend:/app/backend
+      - ./data:/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - DATABASE_PATH=/data/adhd.db

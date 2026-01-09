@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: adhd-thought-capture
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - DATABASE_PATH=/data/adhd.db
+      - DAILY_PICKS_TIME=${DAILY_PICKS_TIME:-08:00}
+      - DECAY_DAYS=${DECAY_DAYS:-30}
+      - NOTIFICATION_ENABLED=${NOTIFICATION_ENABLED:-true}
+      - DASHBOARD_URL=${DASHBOARD_URL:-http://localhost:8000}
+    volumes:
+      - ./data:/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  data:
