@@ -1,8 +1,10 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
-	import { RefreshCw, Settings, Brain, Inbox, CheckCircle2, Archive } from 'lucide-svelte';
+	import { RefreshCw, Settings, Brain, Inbox, CheckCircle2, Archive, LayoutGrid, List, Rows3 } from 'lucide-svelte';
 	import StatsWidget from '$lib/components/StatsWidget.svelte';
 	import ItemCard from '$lib/components/ItemCard.svelte';
+	import ItemTable from '$lib/components/ItemTable.svelte';
+	import ItemAccordion from '$lib/components/ItemAccordion.svelte';
 	import DailyPicks from '$lib/components/DailyPicks.svelte';
 	import SettingsModal from '$lib/components/SettingsModal.svelte';
 	import { getItems, getStats, getDailyPicks, updateItem, deleteItem, regeneratePicks } from '$lib/api';
@@ -10,6 +12,9 @@
 
 	const itemTypes = ['film', 'book', 'concept', 'music', 'art', 'todo', 'other'];
 	const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
+
+	// View mode: 'cards' | 'table' | 'accordion'
+	let viewMode = 'cards';
 
 	const typeIcons = {
 		film: '🎬',
@@ -267,8 +272,33 @@
 				<span class="opacity-60">({$stats.archived})</span>
 			</button>
 
+			<!-- View mode toggle -->
+			<div class="flex items-center gap-1 ml-auto border border-[var(--border)] rounded-lg p-0.5 flex-shrink-0">
+				<button
+					class="btn btn-sm btn-icon {viewMode === 'cards' ? 'btn-primary' : 'btn-ghost'}"
+					on:click={() => viewMode = 'cards'}
+					title="Cards"
+				>
+					<LayoutGrid class="w-4 h-4" />
+				</button>
+				<button
+					class="btn btn-sm btn-icon {viewMode === 'table' ? 'btn-primary' : 'btn-ghost'}"
+					on:click={() => viewMode = 'table'}
+					title="Tabella"
+				>
+					<List class="w-4 h-4" />
+				</button>
+				<button
+					class="btn btn-sm btn-icon {viewMode === 'accordion' ? 'btn-primary' : 'btn-ghost'}"
+					on:click={() => viewMode = 'accordion'}
+					title="Accordion"
+				>
+					<Rows3 class="w-4 h-4" />
+				</button>
+			</div>
+
 			<button
-				class="btn btn-ghost btn-icon flex-shrink-0 ml-auto"
+				class="btn btn-ghost btn-icon flex-shrink-0"
 				on:click={loadItems}
 				disabled={$loading}
 				title="Ricarica"
@@ -337,11 +367,17 @@
 				{/if}
 			</div>
 		{:else}
-			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-				{#each $items as item (item.id)}
-					<ItemCard {item} on:action={handleAction} />
-				{/each}
-			</div>
+			{#if viewMode === 'cards'}
+				<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+					{#each $items as item (item.id)}
+						<ItemCard {item} on:action={handleAction} />
+					{/each}
+				</div>
+			{:else if viewMode === 'table'}
+				<ItemTable items={$items} on:action={handleAction} />
+			{:else if viewMode === 'accordion'}
+				<ItemAccordion items={$items} on:action={handleAction} />
+			{/if}
 		{/if}
 	</div>
 </main>

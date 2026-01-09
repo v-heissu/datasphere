@@ -1,6 +1,6 @@
 <script>
 	import { createEventDispatcher, onMount } from 'svelte';
-	import { X, Save, RotateCcw, Settings, User, Bot } from 'lucide-svelte';
+	import { X, Save, RotateCcw, Settings, User, Bot, Mail, Send, CheckCircle2, AlertCircle } from 'lucide-svelte';
 
 	export let show = false;
 
@@ -11,6 +11,8 @@
 	let loading = false;
 	let saving = false;
 	let activeTab = 'user';
+	let emailTesting = false;
+	let emailResult = null;
 
 	const defaultClassifyPrompt = `Sei un assistente per una persona con ADHD che cattura pensieri velocemente.
 
@@ -108,8 +110,27 @@ REGOLE:
 		classifyPrompt = defaultClassifyPrompt;
 	}
 
+	async function sendTestEmail() {
+		emailTesting = true;
+		emailResult = null;
+		try {
+			const res = await fetch('/api/email/test', { method: 'POST' });
+			const data = await res.json();
+			if (res.ok) {
+				emailResult = { success: true, message: 'Email inviata con successo!' };
+			} else {
+				emailResult = { success: false, message: data.detail || 'Errore invio email' };
+			}
+		} catch (e) {
+			emailResult = { success: false, message: 'Errore di connessione' };
+		} finally {
+			emailTesting = false;
+		}
+	}
+
 	function close() {
 		show = false;
+		emailResult = null;
 		dispatch('close');
 	}
 
@@ -137,24 +158,35 @@ REGOLE:
 			</div>
 
 			<!-- Tabs -->
-			<div class="flex border-b border-[var(--border)]">
+			<div class="flex border-b border-[var(--border)] overflow-x-auto">
 				<button
-					class="flex-1 px-6 py-3 text-sm font-medium transition-colors border-b-2 {activeTab === 'user'
+					class="flex-1 px-4 sm:px-6 py-3 text-sm font-medium transition-colors border-b-2 whitespace-nowrap {activeTab === 'user'
 						? 'border-[var(--accent)] text-[var(--accent)]'
 						: 'border-transparent opacity-60 hover:opacity-100'}"
 					on:click={() => (activeTab = 'user')}
 				>
-					<User class="w-4 h-4 inline mr-2" />
-					Profilo Utente
+					<User class="w-4 h-4 inline mr-1 sm:mr-2" />
+					<span class="hidden sm:inline">Profilo Utente</span>
+					<span class="sm:hidden">Profilo</span>
 				</button>
 				<button
-					class="flex-1 px-6 py-3 text-sm font-medium transition-colors border-b-2 {activeTab === 'prompt'
+					class="flex-1 px-4 sm:px-6 py-3 text-sm font-medium transition-colors border-b-2 whitespace-nowrap {activeTab === 'prompt'
 						? 'border-[var(--accent)] text-[var(--accent)]'
 						: 'border-transparent opacity-60 hover:opacity-100'}"
 					on:click={() => (activeTab = 'prompt')}
 				>
-					<Bot class="w-4 h-4 inline mr-2" />
-					System Prompt
+					<Bot class="w-4 h-4 inline mr-1 sm:mr-2" />
+					<span class="hidden sm:inline">System Prompt</span>
+					<span class="sm:hidden">Prompt</span>
+				</button>
+				<button
+					class="flex-1 px-4 sm:px-6 py-3 text-sm font-medium transition-colors border-b-2 whitespace-nowrap {activeTab === 'email'
+						? 'border-[var(--accent)] text-[var(--accent)]'
+						: 'border-transparent opacity-60 hover:opacity-100'}"
+					on:click={() => (activeTab = 'email')}
+				>
+					<Mail class="w-4 h-4 inline mr-1 sm:mr-2" />
+					Email
 				</button>
 			</div>
 
@@ -181,7 +213,7 @@ REGOLE:
 							/>
 						</div>
 					</div>
-				{:else}
+				{:else if activeTab === 'prompt'}
 					<div class="space-y-4">
 						<div class="flex items-center justify-between">
 							<div>
@@ -206,6 +238,61 @@ REGOLE:
 						<p class="text-xs opacity-40">
 							Variabili disponibili: {'{user_background}'}, {'{recent_items}'}, {'{verbatim_input}'}
 						</p>
+					</div>
+				{:else if activeTab === 'email'}
+					<div class="space-y-6">
+						<div>
+							<h3 class="text-sm font-medium mb-2">Weekly Digest</h3>
+							<p class="text-xs opacity-50 mb-4">
+								Ricevi un riepilogo settimanale via email con statistiche e ultimi pensieri catturati.
+							</p>
+						</div>
+
+						<div class="card p-4 space-y-3">
+							<div class="flex items-center justify-between gap-4">
+								<div>
+									<p class="text-sm font-medium">Test Email Digest</p>
+									<p class="text-xs opacity-50">Invia subito una mail di test</p>
+								</div>
+								<button
+									class="btn btn-primary btn-sm flex-shrink-0"
+									on:click={sendTestEmail}
+									disabled={emailTesting}
+								>
+									{#if emailTesting}
+										<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+									{:else}
+										<Send class="w-4 h-4" />
+									{/if}
+									Invia Test
+								</button>
+							</div>
+
+							{#if emailResult}
+								<div class="flex items-center gap-2 p-3 rounded-lg {emailResult.success ? 'bg-[var(--success)]/20' : 'bg-[var(--danger)]/20'}">
+									{#if emailResult.success}
+										<CheckCircle2 class="w-4 h-4 text-[var(--success)] flex-shrink-0" />
+										<span class="text-sm text-[var(--success)]">{emailResult.message}</span>
+									{:else}
+										<AlertCircle class="w-4 h-4 text-[var(--danger)] flex-shrink-0" />
+										<span class="text-sm text-[var(--danger)]">{emailResult.message}</span>
+									{/if}
+								</div>
+							{/if}
+						</div>
+
+						<div class="text-xs opacity-40 space-y-2">
+							<p>Variabili d'ambiente richieste nel server:</p>
+							<code class="block p-3 bg-black/30 rounded text-[11px] leading-relaxed">
+								EMAIL_ENABLED=true<br>
+								EMAIL_USERNAME=tuaemail@gmail.com<br>
+								EMAIL_PASSWORD=app_password<br>
+								EMAIL_FROM=tuaemail@gmail.com<br>
+								EMAIL_TO=destinatario@email.com<br>
+								WEEKLY_DIGEST_DAY=sat<br>
+								WEEKLY_DIGEST_TIME=08:00
+							</code>
+						</div>
 					</div>
 				{/if}
 			</div>

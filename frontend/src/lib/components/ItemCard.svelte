@@ -1,10 +1,11 @@
 <script>
 	import { createEventDispatcher } from 'svelte';
-	import { ExternalLink, Check, Archive, Clock, ChevronDown, ChevronUp, Trash2, RotateCcw } from 'lucide-svelte';
+	import { ExternalLink, Check, Archive, Clock, ChevronDown, ChevronUp, Trash2, RotateCcw, Copy, CheckCircle2 } from 'lucide-svelte';
 
 	export let item;
 
 	const dispatch = createEventDispatcher();
+	let copied = false;
 
 	const typeLabel = {
 		film: 'Film',
@@ -57,6 +58,31 @@
 		}
 	}
 
+	async function copyCard() {
+		const title = item.title || 'Senza titolo';
+		const type = typeLabel[item.item_type] || 'Altro';
+		const desc = item.description || '';
+		const tags = item.tags?.join(', ') || '';
+		const suggestion = item.enrichment?.consumption_suggestion || '';
+		const mainLink = links[0]?.url || '';
+
+		let text = `${typeIcon[item.item_type] || '📌'} ${title}\n`;
+		text += `Tipo: ${type}\n`;
+		if (desc) text += `${desc}\n`;
+		if (tags) text += `Tag: ${tags}\n`;
+		if (item.estimated_minutes) text += `Tempo: ${item.estimated_minutes}min\n`;
+		if (suggestion) text += `Suggerimento: ${suggestion}\n`;
+		if (mainLink) text += `Link: ${mainLink}\n`;
+
+		try {
+			await navigator.clipboard.writeText(text.trim());
+			copied = true;
+			setTimeout(() => copied = false, 2000);
+		} catch (e) {
+			console.error('Copy failed:', e);
+		}
+	}
+
 	$: daysAgo = getDaysAgo(item.created_at);
 	$: links = item.enrichment?.links || [];
 	$: itemType = item.item_type || 'other';
@@ -80,9 +106,22 @@
 				</div>
 				<h3 class="font-bold text-lg leading-tight">{item.title || 'Senza titolo'}</h3>
 			</div>
-			<div class="flex items-center gap-1.5 text-sm opacity-60 shrink-0">
-				<Clock class="w-4 h-4" />
-				<span>{item.estimated_minutes || '?'}min</span>
+			<div class="flex items-center gap-2 shrink-0">
+				<button
+					class="btn btn-ghost btn-icon opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+					title={copied ? 'Copiato!' : 'Copia'}
+					on:click={copyCard}
+				>
+					{#if copied}
+						<CheckCircle2 class="w-4 h-4 text-[var(--success)]" />
+					{:else}
+						<Copy class="w-4 h-4" />
+					{/if}
+				</button>
+				<div class="flex items-center gap-1.5 text-sm opacity-60">
+					<Clock class="w-4 h-4" />
+					<span>{item.estimated_minutes || '?'}min</span>
+				</div>
 			</div>
 		</div>
 
