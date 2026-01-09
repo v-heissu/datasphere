@@ -37,10 +37,10 @@ INPUT UTENTE:
 
 TASK:
 1. Classifica il tipo di pensiero
-2. Usa web_search per arricchire con info rilevanti (titoli film, autori libri, link Wikipedia, etc.)
-3. Trova link diretti dove consumare/approfondire
-4. Stima tempo necessario
-5. Assegna priorità
+2. Estrai/inferisci il titolo corretto (es: se l'utente scrive "blade runner" -> "Blade Runner 2049" o "Blade Runner")
+3. Suggerisci link utili (IMDb per film, Goodreads/Amazon per libri, Wikipedia per concetti, Spotify per musica)
+4. Stima tempo necessario per consumare
+5. Assegna priorità basata su interesse/urgenza
 
 OUTPUT (JSON puro, senza markdown):
 {{
@@ -155,13 +155,10 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
             verbatim_input=verbatim
         )
 
-        # Call Claude with web search tool
+        # Call Claude for classification
         response = client.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=2000,
-            tools=[
-                {"type": "web_search_20250305", "name": "web_search"}
-            ],
             messages=[
                 {"role": "user", "content": prompt}
             ]
