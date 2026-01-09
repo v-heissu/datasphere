@@ -287,6 +287,16 @@ async def get_item_by_id(item_id: int) -> Optional[Dict[str, Any]]:
         return row_to_dict(row)
 
 
+async def delete_item(item_id: int) -> bool:
+    """Delete an item permanently from the database."""
+    async with get_db() as db:
+        cursor = await db.execute(
+            "DELETE FROM items WHERE id = ?", (item_id,)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
 async def get_items_filtered(
     status: Optional[str] = None,
     item_type: Optional[str] = None,

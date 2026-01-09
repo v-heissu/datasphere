@@ -189,6 +189,24 @@ async def update_item(item_id: int, update: ItemUpdate):
     return {"success": True}
 
 
+@app.delete("/api/items/{item_id}")
+async def delete_item(item_id: int):
+    """Delete an item permanently."""
+    from database import delete_item as db_delete_item
+
+    # Check item exists
+    item = await get_item_by_id(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    success = await db_delete_item(item_id)
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete item")
+
+    return {"success": True}
+
+
 @app.get("/api/stats", response_model=StatsResponse)
 async def get_stats():
     """Get user statistics."""

@@ -41,6 +41,12 @@ export async function updateItem(itemId, updates) {
 	});
 }
 
+export async function deleteItem(itemId) {
+	return fetchAPI(`/items/${itemId}`, {
+		method: 'DELETE'
+	});
+}
+
 export async function getStats() {
 	return fetchAPI('/stats');
 }

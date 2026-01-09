@@ -148,8 +148,12 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
         user_background = await get_config('user_background', '')
         recent_items = await get_recent_items(limit=5)
 
+        # Get custom prompt if configured, otherwise use default
+        custom_prompt = await get_config('classify_prompt', '')
+        prompt_template = custom_prompt if custom_prompt else CLASSIFY_PROMPT
+
         # Format prompt
-        prompt = CLASSIFY_PROMPT.format(
+        prompt = prompt_template.format(
             user_background=user_background or "Nessun background impostato",
             recent_items=json.dumps(recent_items, indent=2, ensure_ascii=False) if recent_items else "Nessun item recente",
             verbatim_input=verbatim

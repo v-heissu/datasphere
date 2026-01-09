@@ -1,12 +1,12 @@
 <script>
 	import { createEventDispatcher } from 'svelte';
-	import { ExternalLink, Check, Archive, Clock, ChevronDown, ChevronUp } from 'lucide-svelte';
+	import { ExternalLink, Check, Archive, Clock, ChevronDown, ChevronUp, Trash2, RotateCcw } from 'lucide-svelte';
 
 	export let item;
 
 	const dispatch = createEventDispatcher();
 
-	const typeEmoji = {
+	const typeLabel = {
 		film: 'Film',
 		book: 'Libro',
 		concept: 'Concetto',
@@ -16,17 +16,18 @@
 		other: 'Altro'
 	};
 
-	const typeColor = {
-		film: 'border-l-purple-500 bg-purple-50',
-		book: 'border-l-blue-500 bg-blue-50',
-		concept: 'border-l-yellow-500 bg-yellow-50',
-		music: 'border-l-pink-500 bg-pink-50',
-		art: 'border-l-green-500 bg-green-50',
-		todo: 'border-l-red-500 bg-red-50',
-		other: 'border-l-gray-500 bg-gray-50'
+	const typeIcon = {
+		film: '🎬',
+		book: '📚',
+		concept: '💡',
+		music: '🎵',
+		art: '🎨',
+		todo: '✓',
+		other: '📌'
 	};
 
 	let showDetails = false;
+	let confirmDelete = false;
 
 	function formatDate(dateStr) {
 		if (!dateStr) return '';
@@ -46,32 +47,40 @@
 		return diff;
 	}
 
+	function handleDelete() {
+		if (confirmDelete) {
+			dispatch('action', { action: 'delete', id: item.id });
+			confirmDelete = false;
+		} else {
+			confirmDelete = true;
+			setTimeout(() => confirmDelete = false, 3000);
+		}
+	}
+
 	$: daysAgo = getDaysAgo(item.created_at);
 	$: links = item.enrichment?.links || [];
+	$: itemType = item.item_type || 'other';
 </script>
 
-<div
-	class="card border-l-4 {typeColor[item.item_type] ||
-		typeColor.other} hover:shadow-md transition-shadow"
->
-	<div class="p-4">
+<div class="card type-{itemType} animate-fade-in group">
+	<div class="p-5">
 		<!-- Header -->
-		<div class="flex items-start justify-between mb-3">
-			<div class="flex-1">
-				<div class="flex items-center gap-2 mb-1">
-					<span
-						class="text-xs font-medium px-2 py-0.5 rounded-full bg-white/50 text-gray-600 border"
-					>
-						{typeEmoji[item.item_type] || typeEmoji.other}
+		<div class="flex items-start justify-between gap-4 mb-4">
+			<div class="flex-1 min-w-0">
+				<div class="flex items-center gap-2 mb-2">
+					<span class="text-lg">{typeIcon[itemType] || typeIcon.other}</span>
+					<span class="text-xs font-semibold uppercase tracking-wider opacity-70">
+						{typeLabel[itemType] || typeLabel.other}
 					</span>
 					{#if daysAgo > 7}
-						<span class="text-xs text-orange-500 font-medium"> {daysAgo}g fa </span>
+						<span class="text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 font-medium">
+							{daysAgo}g fa
+						</span>
 					{/if}
 				</div>
-				<h3 class="font-bold text-gray-900 text-lg">{item.title || 'Senza titolo'}</h3>
-				<p class="text-xs text-gray-500">{formatDate(item.created_at)}</p>
+				<h3 class="font-bold text-lg leading-tight">{item.title || 'Senza titolo'}</h3>
 			</div>
-			<div class="flex items-center gap-2 text-sm text-gray-500">
+			<div class="flex items-center gap-1.5 text-sm opacity-60 shrink-0">
 				<Clock class="w-4 h-4" />
 				<span>{item.estimated_minutes || '?'}min</span>
 			</div>
@@ -79,23 +88,23 @@
 
 		<!-- Description -->
 		{#if item.description}
-			<p class="text-sm text-gray-700 mb-3">{item.description}</p>
+			<p class="text-sm opacity-70 mb-4 leading-relaxed">{item.description}</p>
 		{/if}
 
 		<!-- Tags -->
 		{#if item.tags && item.tags.length > 0}
-			<div class="flex gap-1 mb-3 flex-wrap">
+			<div class="flex gap-1.5 mb-4 flex-wrap">
 				{#each item.tags as tag}
-					<span class="text-xs px-2 py-0.5 bg-white/70 rounded border text-gray-600">{tag}</span>
+					<span class="text-xs px-2 py-1 rounded-lg bg-white/5 border border-white/10">{tag}</span>
 				{/each}
 			</div>
 		{/if}
 
 		<!-- Links (collapsible) -->
 		{#if links.length > 0}
-			<div class="mb-3">
+			<div class="mb-4">
 				<button
-					class="text-xs text-primary-600 hover:underline flex items-center gap-1"
+					class="text-xs opacity-60 hover:opacity-100 flex items-center gap-1 transition-opacity"
 					on:click={() => (showDetails = !showDetails)}
 				>
 					{#if showDetails}
@@ -107,17 +116,17 @@
 				</button>
 
 				{#if showDetails}
-					<div class="mt-2 space-y-1">
+					<div class="mt-3 space-y-2 animate-fade-in">
 						{#each links as link}
 							<a
 								href={link.url}
 								target="_blank"
 								rel="noopener noreferrer"
-								class="flex items-center gap-2 text-xs text-primary-600 hover:underline truncate"
+								class="flex items-center gap-2 text-xs hover:opacity-100 opacity-70 transition-opacity group/link"
 							>
-								<ExternalLink class="w-3 h-3 flex-shrink-0" />
-								<span class="text-gray-500 font-medium">{link.type}:</span>
-								<span class="truncate">{link.url}</span>
+								<ExternalLink class="w-3 h-3 flex-shrink-0 text-[var(--accent)]" />
+								<span class="font-medium text-[var(--accent)]">{link.type}</span>
+								<span class="truncate opacity-60 group-hover/link:opacity-100">{link.url}</span>
 							</a>
 						{/each}
 					</div>
@@ -127,13 +136,13 @@
 
 		<!-- Consumption suggestion -->
 		{#if item.enrichment?.consumption_suggestion}
-			<p class="text-xs text-gray-500 italic mb-3">
-				"{item.enrichment.consumption_suggestion}"
+			<p class="text-xs opacity-50 italic mb-4 border-l-2 border-white/20 pl-3">
+				{item.enrichment.consumption_suggestion}
 			</p>
 		{/if}
 
 		<!-- Actions -->
-		<div class="flex gap-2 pt-2 border-t border-gray-200">
+		<div class="flex items-center gap-2 pt-4 border-t border-white/10">
 			{#if item.status === 'pending'}
 				<button
 					class="btn btn-success btn-sm flex-1"
@@ -143,22 +152,52 @@
 					Fatto
 				</button>
 				<button
-					class="btn btn-secondary btn-sm"
+					class="btn btn-secondary btn-sm btn-icon"
+					title="Archivia"
 					on:click={() => dispatch('action', { action: 'archived', id: item.id })}
 				>
 					<Archive class="w-4 h-4" />
 				</button>
-			{:else if item.status === 'consumed'}
-				<span class="text-green-600 text-sm flex items-center gap-1">
-					<Check class="w-4 h-4" />
-					Consumato {formatDate(item.consumed_at)}
-				</span>
-			{:else if item.status === 'archived'}
 				<button
-					class="btn btn-secondary btn-sm"
+					class="btn btn-sm btn-icon {confirmDelete ? 'btn-danger' : 'btn-ghost'}"
+					title={confirmDelete ? 'Conferma eliminazione' : 'Elimina'}
+					on:click={handleDelete}
+				>
+					<Trash2 class="w-4 h-4" />
+				</button>
+			{:else if item.status === 'consumed'}
+				<div class="flex-1 flex items-center gap-2 text-sm text-[var(--success)]">
+					<Check class="w-4 h-4" />
+					<span>Consumato {formatDate(item.consumed_at)}</span>
+				</div>
+				<button
+					class="btn btn-sm btn-icon btn-ghost"
+					title="Ripristina"
 					on:click={() => dispatch('action', { action: 'pending', id: item.id })}
 				>
+					<RotateCcw class="w-4 h-4" />
+				</button>
+				<button
+					class="btn btn-sm btn-icon {confirmDelete ? 'btn-danger' : 'btn-ghost'}"
+					title={confirmDelete ? 'Conferma eliminazione' : 'Elimina'}
+					on:click={handleDelete}
+				>
+					<Trash2 class="w-4 h-4" />
+				</button>
+			{:else if item.status === 'archived'}
+				<button
+					class="btn btn-secondary btn-sm flex-1"
+					on:click={() => dispatch('action', { action: 'pending', id: item.id })}
+				>
+					<RotateCcw class="w-4 h-4" />
 					Ripristina
+				</button>
+				<button
+					class="btn btn-sm btn-icon {confirmDelete ? 'btn-danger' : 'btn-ghost'}"
+					title={confirmDelete ? 'Conferma eliminazione' : 'Elimina'}
+					on:click={handleDelete}
+				>
+					<Trash2 class="w-4 h-4" />
 				</button>
 			{/if}
 		</div>
