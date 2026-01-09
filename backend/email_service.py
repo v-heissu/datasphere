@@ -3,6 +3,7 @@ Email service for weekly digest notifications.
 """
 
 import smtplib
+import json
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -24,10 +25,10 @@ async def get_weekly_items() -> Dict[str, Any]:
     week_ago = (datetime.now() - timedelta(days=7)).isoformat()
 
     async with get_db() as db:
-        # Get all items from last week
+        # Get all items from last week - using correct column names
         cursor = await db.execute("""
-            SELECT id, verbatim, title, category, priority, status,
-                   action_type, enriched_content, created_at
+            SELECT id, verbatim_input, title, item_type, priority, status,
+                   description, enrichment, estimated_minutes, created_at
             FROM items
             WHERE created_at >= ?
             ORDER BY created_at DESC
@@ -36,106 +37,106 @@ async def get_weekly_items() -> Dict[str, Any]:
 
         items = []
         for row in rows:
+            # Parse enrichment JSON
+            enrichment = None
+            if row[7]:
+                try:
+                    enrichment = json.loads(row[7]) if isinstance(row[7], str) else row[7]
+                except:
+                    enrichment = {}
+
             items.append({
                 'id': row[0],
-                'verbatim': row[1],
+                'verbatim_input': row[1],
                 'title': row[2],
-                'category': row[3],
+                'item_type': row[3],
                 'priority': row[4],
                 'status': row[5],
-                'action_type': row[6],
-                'enriched_content': row[7],
-                'created_at': row[8]
+                'description': row[6],
+                'enrichment': enrichment,
+                'estimated_minutes': row[8],
+                'created_at': row[9]
             })
 
         # Get stats
         total = len(items)
-        by_category = {}
+        by_type = {}
         by_status = {}
-        by_priority = {}
 
         for item in items:
-            cat = item['category'] or 'uncategorized'
-            by_category[cat] = by_category.get(cat, 0) + 1
+            item_type = item['item_type'] or 'other'
+            by_type[item_type] = by_type.get(item_type, 0) + 1
 
             status = item['status'] or 'pending'
             by_status[status] = by_status.get(status, 0) + 1
 
-            priority = item['priority'] or 'medium'
-            by_priority[priority] = by_priority.get(priority, 0) + 1
-
         return {
             'items': items,
             'total': total,
-            'by_category': by_category,
-            'by_status': by_status,
-            'by_priority': by_priority
+            'by_type': by_type,
+            'by_status': by_status
         }
 
 
-def get_category_emoji(category: str) -> str:
-    """Get emoji for category."""
+def get_type_emoji(item_type: str) -> str:
+    """Get emoji for item type."""
     emojis = {
-        'watch': '🎬',
-        'listen': '🎵',
-        'read': '📚',
-        'explore': '🔍',
-        'buy': '🛒',
-        'do': '✅',
-        'idea': '💡',
-        'remember': '📝',
-        'learn': '🎓',
+        'film': '🎬',
+        'book': '📚',
+        'concept': '💡',
+        'music': '🎵',
+        'art': '🎨',
+        'todo': '✓',
         'other': '📌'
     }
-    return emojis.get(category.lower() if category else 'other', '📌')
+    return emojis.get(item_type.lower() if item_type else 'other', '📌')
 
 
-def get_priority_color(priority: str) -> str:
+def get_priority_color(priority) -> str:
     """Get color for priority."""
-    colors = {
-        'high': '#ef4444',
-        'medium': '#f59e0b',
-        'low': '#22c55e'
-    }
-    return colors.get(priority.lower() if priority else 'medium', '#f59e0b')
+    if isinstance(priority, int):
+        if priority >= 4:
+            return '#ef4444'  # high - red
+        elif priority >= 2:
+            return '#f59e0b'  # medium - orange
+        else:
+            return '#22c55e'  # low - green
+    return '#f59e0b'  # default medium
 
 
 def build_html_email(data: Dict[str, Any]) -> str:
     """Build beautiful HTML email for weekly digest."""
     items = data['items']
     total = data['total']
-    by_category = data['by_category']
+    by_type = data['by_type']
     by_status = data['by_status']
 
-    # Build category stats HTML
-    category_stats_html = ""
-    for cat, count in sorted(by_category.items(), key=lambda x: -x[1]):
-        emoji = get_category_emoji(cat)
-        category_stats_html += f"""
+    # Build type stats HTML
+    type_stats_html = ""
+    for item_type, count in sorted(by_type.items(), key=lambda x: -x[1]):
+        emoji = get_type_emoji(item_type)
+        type_stats_html += f"""
             <div style="display: inline-block; margin: 4px 8px 4px 0; padding: 6px 12px; background: #374151; border-radius: 20px; font-size: 13px;">
-                {emoji} {cat.title()}: <strong>{count}</strong>
+                {emoji} {item_type.title()}: <strong>{count}</strong>
             </div>
         """
 
     # Build items HTML (top 15 items)
     items_html = ""
     for item in items[:15]:
-        emoji = get_category_emoji(item['category'])
+        emoji = get_type_emoji(item['item_type'])
         priority_color = get_priority_color(item['priority'])
-        title = item['title'] or item['verbatim'][:50] + ('...' if len(item['verbatim']) > 50 else '')
+        verbatim = item['verbatim_input'] or ''
+        title = item['title'] or verbatim[:50] + ('...' if len(verbatim) > 50 else '')
         status_badge = '✓' if item['status'] == 'consumed' else '○'
         status_color = '#22c55e' if item['status'] == 'consumed' else '#6b7280'
 
-        # Parse enriched content for link
+        # Get link from enrichment
         link_html = ""
-        if item['enriched_content']:
-            try:
-                import json
-                enriched = json.loads(item['enriched_content']) if isinstance(item['enriched_content'], str) else item['enriched_content']
-                if enriched.get('link'):
-                    link_html = f' <a href="{enriched["link"]}" style="color: #60a5fa; text-decoration: none;">🔗</a>'
-            except:
-                pass
+        if item['enrichment'] and isinstance(item['enrichment'], dict):
+            links = item['enrichment'].get('links', [])
+            if links and len(links) > 0:
+                link_html = f' <a href="{links[0].get("url", "")}" style="color: #60a5fa; text-decoration: none;">🔗</a>'
 
         created = datetime.fromisoformat(item['created_at']).strftime('%d/%m') if item['created_at'] else ''
 
@@ -148,7 +149,7 @@ def build_html_email(data: Dict[str, Any]) -> str:
                 <td style="padding: 12px 8px; border-bottom: 1px solid #374151;">
                     <span style="color: #f3f4f6;">{title}</span>{link_html}
                     <br>
-                    <span style="color: #9ca3af; font-size: 12px;">{item['verbatim'][:80]}{'...' if len(item['verbatim']) > 80 else ''}</span>
+                    <span style="color: #9ca3af; font-size: 12px;">"{verbatim[:80]}{'...' if len(verbatim) > 80 else ''}"</span>
                 </td>
                 <td style="padding: 12px 8px; border-bottom: 1px solid #374151; text-align: center;">
                     <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: {priority_color};"></span>
@@ -162,7 +163,6 @@ def build_html_email(data: Dict[str, Any]) -> str:
     # Status summary
     consumed = by_status.get('consumed', 0)
     pending = by_status.get('pending', 0)
-    archived = by_status.get('archived', 0)
 
     html = f"""
     <!DOCTYPE html>
@@ -200,13 +200,13 @@ def build_html_email(data: Dict[str, Any]) -> str:
                 </div>
             </div>
 
-            <!-- Categories -->
+            <!-- Types -->
             <div style="background: #1f2937; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
                 <h3 style="margin: 0 0 12px 0; color: #f3f4f6; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">
-                    Per Categoria
+                    Per Tipo
                 </h3>
                 <div>
-                    {category_stats_html}
+                    {type_stats_html}
                 </div>
             </div>
 
@@ -273,10 +273,12 @@ Il tuo recap settimanale • {datetime.now().strftime('%d %B %Y')}
 """
 
     for item in items[:15]:
-        emoji = get_category_emoji(item['category'])
+        emoji = get_type_emoji(item['item_type'])
         status = '✓' if item['status'] == 'consumed' else '○'
-        title = item['title'] or item['verbatim'][:50]
+        verbatim = item['verbatim_input'] or ''
+        title = item['title'] or verbatim[:50]
         text += f"{status} {emoji} {title}\n"
+        text += f"   \"{verbatim[:60]}{'...' if len(verbatim) > 60 else ''}\"\n\n"
 
     if total > 15:
         text += f"\n...e altri {total - 15} elementi\n"

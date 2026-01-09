@@ -130,6 +130,13 @@
 			<p class="text-sm opacity-70 mb-4 leading-relaxed">{item.description}</p>
 		{/if}
 
+		<!-- Original query (verbatim) -->
+		{#if item.verbatim_input}
+			<p class="text-xs opacity-40 mb-4 italic border-l-2 border-white/10 pl-3">
+				"{item.verbatim_input}"
+			</p>
+		{/if}
+
 		<!-- Tags -->
 		{#if item.tags && item.tags.length > 0}
 			<div class="flex gap-1.5 mb-4 flex-wrap">

@@ -7,62 +7,83 @@ Sistema personale per catturare pensieri destrutturati via Telegram, classificar
 ## Features
 
 - **Cattura frictionless**: Manda un messaggio Telegram, fatto
-- **Classificazione AI**: Claude capisce cosa intendi (film, libro, concetto, musica, todo...)
-- **Arricchimento automatico**: Link rilevanti, stima tempo, suggerimenti
-- **Daily picks**: Suggerimenti personalizzati ogni mattina
+- **Classificazione AI**: Claude Sonnet 4.5 con web_search capisce cosa intendi
+- **Arricchimento automatico**: Link rilevanti (IMDb, Spotify, Wikipedia), stima tempo, suggerimenti
+- **Daily picks**: Suggerimenti personalizzati ogni mattina (Claude Haiku)
+- **Weekly digest**: Email settimanale con recap e statistiche
+- **3 Modalità vista**: Cards, Tabella, Accordion
 - **Auto-archive**: I pensieri vecchi vengono archiviati, non persi
-- **Dashboard**: Interfaccia pulita per consumare e gestire
+- **Dark mode**: Interfaccia dark responsive e mobile-friendly
 
 ## Quick Start
 
-### 1. Setup
+### 1. Prerequisiti
+
+- Docker e Docker Compose
+- Token Telegram Bot (da [@BotFather](https://t.me/BotFather))
+- API Key Anthropic (da [console.anthropic.com](https://console.anthropic.com))
+
+### 2. Setup
 
 ```bash
 # Clone repository
 git clone <repository-url>
-cd adhd-thought-capture
+cd datasphere
 
 # Copia e configura environment
 cp .env.example .env
+nano .env
 ```
 
-### 2. Configura `.env`
+### 3. Configura `.env`
 
+**Obbligatorie:**
 ```bash
-# Token Telegram (ottienilo da @BotFather)
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-
-# API Key Claude (da console.anthropic.com)
 CLAUDE_API_KEY=your_claude_api_key
-
-# Optional
-DAILY_PICKS_TIME=08:00
-DECAY_DAYS=30
 DASHBOARD_URL=https://tuo-dominio.it
 ```
 
-### 3. Run con Docker
+**Opzionali:**
+```bash
+DAILY_PICKS_TIME=08:00
+DECAY_DAYS=30
+NOTIFICATION_ENABLED=true
+```
+
+**Email (opzionale):**
+```bash
+EMAIL_ENABLED=true
+EMAIL_SMTP_HOST=smtp.gmail.com
+EMAIL_SMTP_PORT=587
+EMAIL_USERNAME=tuaemail@gmail.com
+EMAIL_PASSWORD=app_password_gmail  # App Password, non password normale!
+EMAIL_FROM=tuaemail@gmail.com
+EMAIL_TO=tuaemail@gmail.com
+WEEKLY_DIGEST_TIME=08:00
+WEEKLY_DIGEST_DAY=sat
+```
+
+> **Gmail**: Genera una App Password su https://myaccount.google.com/apppasswords
+
+### 4. Run con Docker
 
 ```bash
 # Build e avvia
-docker-compose up -d
+docker-compose up -d --build
 
 # Verifica logs
 docker-compose logs -f
 ```
 
-### 4. Setup Telegram Bot
-
-1. Trova il tuo bot su Telegram (quello creato con @BotFather)
-2. Invia `/start`
-3. Il bot salverà automaticamente il tuo chat_id
+Dashboard disponibile su `http://localhost:8000`
 
 ## Usage
 
 ### Telegram Commands
 
 - `/start` - Inizia e registra il tuo account
-- `/background` - Imposta interessi e preferenze (migliora la classificazione)
+- `/background` - Imposta interessi e preferenze
 - `/stats` - Statistiche personali
 - `/today` - Picks del giorno
 - `/help` - Aiuto
@@ -70,42 +91,61 @@ docker-compose logs -f
 ### Inviare pensieri
 
 Basta mandare un messaggio:
-- `Blade Runner 2049` → classificato come film, link IMDb
-- `Thinking Fast and Slow` → libro, link Amazon/Goodreads
-- `filosofia stoica` → concetto, link Wikipedia/articoli
-- `comprare latte` → todo
+- `Blade Runner 2049` → Film, link IMDb
+- `Thinking Fast and Slow` → Libro, link Amazon
+- `filosofia stoica` → Concetto, link Wikipedia
+- `ascoltare boards of canada` → Musica, link Spotify
+- `comprare latte` → Todo
 
 ### Dashboard
 
-Accedi a `http://localhost:8000` (o il tuo dominio) per:
-- Vedere tutti i pensieri catturati
-- Marcare come "consumato" o "archiviato"
-- Filtrare per tipo/status
-- Vedere statistiche e streak
+- **Vista Cards/Table/Accordion** - Toggle in alto a destra
+- **Filtri** - Status (Coda, Fatti, Archivio) e tipo
+- **Daily Picks** - Suggerimenti AI bilanciati per tipo/tempo
+- **Settings** - Profilo utente, system prompt, test email
+- **Copia** - Bottone su ogni card (hover)
+- **Auto-refresh** - Aggiornamento automatico ogni 30s
 
-## Development
+## Deploy su Railway
 
-### Backend
+### 1. Setup
 
-```bash
-cd backend
-pip install -r ../requirements.txt
-python main.py
-```
+1. [railway.app](https://railway.app) → New Project → GitHub repo
+2. Configura le variabili in Settings → Variables
 
-### Frontend
+### 2. Persistenza Database (IMPORTANTE)
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+Il database deve persistere tra i deploy:
 
-### Dev con Docker
+**Opzione A - Railway Volume:**
+1. Settings → Volumes
+2. Add volume montato su `/data`
+3. Database salvato in `/data/adhd.db`
 
-```bash
-docker-compose -f docker-compose.dev.yml up
-```
+**Opzione B - Database esterno:**
+Usa PostgreSQL (Railway, Supabase, etc.) modificando `database.py`
+
+### 3. Custom Domain
+
+1. Settings → Domains
+2. Add custom domain
+3. Configura DNS
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health` | GET | Health check |
+| `/api/items` | GET | Lista items (filtri: status, item_type, limit) |
+| `/api/items/{id}` | GET | Singolo item |
+| `/api/items/{id}` | PATCH | Aggiorna status/feedback |
+| `/api/items/{id}` | DELETE | Elimina item |
+| `/api/stats` | GET | Statistiche utente |
+| `/api/daily-picks` | GET | Picks del giorno |
+| `/api/daily-picks/regenerate` | POST | Rigenera picks |
+| `/api/config` | GET | Tutte le configurazioni |
+| `/api/config/{key}` | GET/POST | Singola configurazione |
+| `/api/email/test` | POST | Invia email di test |
 
 ## Architecture
 
@@ -124,9 +164,8 @@ docker-compose -f docker-compose.dev.yml up
 │              ▼                  │
 │  ┌─────────────────────────┐   │
 │  │  Claude AI Service      │   │
-│  │  - Classify             │   │
-│  │  - Enrich (web search)  │   │
-│  │  - Generate picks       │   │
+│  │  - Sonnet + web_search  │   │
+│  │  - Haiku for picks      │   │
 │  └───────────┬─────────────┘   │
 │              ▼                  │
 │  ┌─────────────────────────┐   │
@@ -135,8 +174,14 @@ docker-compose -f docker-compose.dev.yml up
 │                                 │
 │  ┌─────────────────────────┐   │
 │  │   Scheduler (APScheduler)│  │
-│  │   - Daily picks         │   │
-│  │   - Auto-archive        │   │
+│  │   - Daily picks (8:00)  │   │
+│  │   - Auto-archive (2:00) │   │
+│  │   - Weekly email (Sat)  │   │
+│  └─────────────────────────┘   │
+│                                 │
+│  ┌─────────────────────────┐   │
+│  │    Email Service        │   │
+│  │    (Gmail SMTP)         │   │
 │  └─────────────────────────┘   │
 └──────────────┼─────────────────┘
                │ HTTP
@@ -147,72 +192,92 @@ docker-compose -f docker-compose.dev.yml up
       └─────────────────┘
 ```
 
-## API Endpoints
+## Project Structure
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Health check |
-| `/api/items` | GET | Lista items (filtri: status, item_type) |
-| `/api/items/{id}` | GET | Singolo item |
-| `/api/items/{id}` | PATCH | Aggiorna status/feedback |
-| `/api/stats` | GET | Statistiche utente |
-| `/api/daily-picks` | GET | Picks del giorno |
-| `/api/config/{key}` | GET/POST | Configurazione |
+```
+datasphere/
+├── backend/
+│   ├── main.py           # FastAPI app
+│   ├── config.py         # Configuration
+│   ├── database.py       # SQLite operations
+│   ├── claude_service.py # Claude AI (Sonnet + Haiku)
+│   ├── telegram_bot.py   # Telegram bot
+│   ├── email_service.py  # Weekly digest email
+│   ├── scheduler.py      # APScheduler jobs
+│   └── models.py         # Pydantic models
+├── frontend/
+│   ├── src/
+│   │   ├── routes/       # SvelteKit pages
+│   │   └── lib/
+│   │       ├── components/
+│   │       │   ├── ItemCard.svelte
+│   │       │   ├── ItemTable.svelte
+│   │       │   ├── ItemAccordion.svelte
+│   │       │   ├── DailyPicks.svelte
+│   │       │   ├── StatsWidget.svelte
+│   │       │   └── SettingsModal.svelte
+│   │       ├── stores.js
+│   │       └── api.js
+│   └── static/
+├── docker-compose.yml
+├── Dockerfile
+├── requirements.txt
+└── .env.example
+```
 
 ## Tech Stack
 
-- **Backend**: FastAPI, Python 3.11, SQLite
-- **AI**: Anthropic Claude API (Sonnet) con web search
+- **Backend**: FastAPI, Python 3.11, SQLite (aiosqlite)
+- **AI**: Claude Sonnet 4.5 (classify + web_search), Claude Haiku (picks)
 - **Messaging**: python-telegram-bot (polling)
+- **Email**: smtplib (Gmail SMTP)
 - **Scheduling**: APScheduler
 - **Frontend**: Svelte, SvelteKit, TailwindCSS
 - **Deploy**: Docker, Docker Compose
 
-## Configuration
+## Development
 
-### user_background
-
-Imposta con `/background` su Telegram. Esempio:
-
-> "Amo cinema d'autore, sci-fi cerebrale tipo Blade Runner, musica elettronica ambient, filosofia continentale. Odio action stupidi e pop commerciale."
-
-Questo migliora significativamente la classificazione e i suggerimenti.
-
-### Daily Picks
-
-- Generati automaticamente all'ora configurata (`DAILY_PICKS_TIME`)
-- 3-5 items bilanciati per tipo e tempo
-- Priorità a items vecchi per evitare accumulo
-
-### Auto-Archive
-
-Items pending da più di `DECAY_DAYS` (default 30) vengono automaticamente archiviati. Non persi, solo organizzati.
-
-## Nginx Reverse Proxy
-
-```nginx
-server {
-    listen 80;
-    server_name adhd.tuodominio.it;
-
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
+### Backend
 
 ```bash
-# SSL con Certbot
-sudo certbot --nginx -d adhd.tuodominio.it
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r ../requirements.txt
+python main.py
 ```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## Troubleshooting
+
+### Bot non risponde
+- Verifica `TELEGRAM_BOT_TOKEN`
+- Check logs: `docker-compose logs -f`
+
+### Classificazione fallisce
+- Verifica `CLAUDE_API_KEY` valido
+- Check quota API Anthropic
+
+### Email non arriva
+- `EMAIL_ENABLED=true`?
+- Per Gmail usa App Password
+- Test: `POST /api/email/test`
+
+### Database perso dopo deploy
+- Configura volume persistente su `/data`
+- NON usare `docker-compose down -v`
 
 ## Costs
 
-Claude API con web search: ~$0.02/pensiero. Per 20 pensieri/giorno ≈ $12/mese.
+Claude API con web_search: ~$0.02-0.05/pensiero
+Per 20 pensieri/giorno ≈ $12-30/mese
 
 ## License
 

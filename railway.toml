@@ -1,0 +1,13 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/api/health"
+healthcheckTimeout = 100
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# IMPORTANT: Add a volume in Railway Dashboard -> Settings -> Volumes
+# Mount point: /data
+# This ensures the SQLite database persists between deployments
