@@ -24,17 +24,14 @@ from models import ItemClassification, DailyPicksResult
 logger = logging.getLogger(__name__)
 
 # Initialize clients based on provider
-gemini_model_classify = None
-gemini_model_picks = None
+gemini_client = None
 claude_client = None
 
 if LLM_PROVIDER == "gemini" and GOOGLE_API_KEY:
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=GOOGLE_API_KEY)
-        gemini_model_classify = genai.GenerativeModel(GEMINI_MODEL_CLASSIFY)
-        gemini_model_picks = genai.GenerativeModel(GEMINI_MODEL_PICKS)
-        logger.info(f"Initialized Gemini models: {GEMINI_MODEL_CLASSIFY}, {GEMINI_MODEL_PICKS}")
+        from google import genai
+        gemini_client = genai.Client(api_key=GOOGLE_API_KEY)
+        logger.info(f"Initialized Gemini client for models: {GEMINI_MODEL_CLASSIFY}, {GEMINI_MODEL_PICKS}")
     except Exception as e:
         logger.error(f"Failed to initialize Gemini: {e}")
 
@@ -207,32 +204,34 @@ def extract_json(text: str) -> Optional[Dict]:
 
 async def classify_with_gemini(prompt: str) -> Optional[Dict]:
     """Classify using Gemini with Google Search grounding."""
-    if not gemini_model_classify:
-        logger.error("Gemini model not initialized")
+    if not gemini_client:
+        logger.error("Gemini client not initialized")
         return None
 
     try:
-        import google.generativeai as genai
-        # Import protos for explicit tool definition to avoid parsing errors
-        from google.generativeai import protos
-        from google.api_core import retry
+        from google.genai import types
+        import asyncio
 
-        # Explicit Tool definition using protos (more robust than dict syntax)
-        # This prevents SDK from confusing google_search with a function declaration
-        search_tool = protos.Tool(
-            google_search=protos.GoogleSearch()
+        # Create Google Search tool for grounding
+        search_tool = types.Tool(google_search=types.GoogleSearch())
+
+        # Configuration with tools and JSON response
+        config = types.GenerateContentConfig(
+            tools=[search_tool],
+            response_mime_type="application/json",
+            max_output_tokens=2000,
+            temperature=0.7
         )
 
-        response = await gemini_model_classify.generate_content_async(
-            prompt,
-            tools=[search_tool],
-            generation_config=genai.GenerationConfig(
-                max_output_tokens=2000,
-                temperature=0.7,
-                response_mime_type="application/json"
-            ),
-            # Retry policy for network timeouts
-            request_options={'retry': retry.Retry(predicate=retry.if_transient_error)}
+        # Run sync client in async context
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: gemini_client.models.generate_content(
+                model=GEMINI_MODEL_CLASSIFY,
+                contents=prompt,
+                config=config
+            )
         )
 
         if response.text:
@@ -241,8 +240,6 @@ async def classify_with_gemini(prompt: str) -> Optional[Dict]:
 
     except Exception as e:
         logger.error(f"Gemini classification error: {e}")
-        if hasattr(e, 'response') and hasattr(e.response, 'prompt_feedback'):
-            logger.error(f"Safety feedback: {e.response.prompt_feedback}")
         return None
 
 
@@ -280,20 +277,29 @@ async def classify_with_claude(prompt: str) -> Optional[Dict]:
 
 async def generate_picks_with_gemini(prompt: str) -> Optional[Dict]:
     """Generate daily picks using Gemini."""
-    if not gemini_model_picks:
-        logger.error("Gemini model not initialized")
+    if not gemini_client:
+        logger.error("Gemini client not initialized")
         return None
 
     try:
-        import google.generativeai as genai
+        from google.genai import types
+        import asyncio
 
-        # Use async version for proper async/await handling
-        response = await gemini_model_picks.generate_content_async(
-            prompt,
-            generation_config=genai.GenerationConfig(
-                max_output_tokens=1500,
-                temperature=0.7,
-                response_mime_type="application/json"
+        # Configuration for JSON response (no search tool needed for picks)
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            max_output_tokens=1500,
+            temperature=0.7
+        )
+
+        # Run sync client in async context
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: gemini_client.models.generate_content(
+                model=GEMINI_MODEL_PICKS,
+                contents=prompt,
+                config=config
             )
         )
 
@@ -338,7 +344,7 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
     Classifica e arricchisce un pensiero usando l'LLM configurato.
     """
     # Check if any provider is available
-    if LLM_PROVIDER == "gemini" and not gemini_model_classify:
+    if LLM_PROVIDER == "gemini" and not gemini_client:
         logger.error("Gemini not initialized - missing GOOGLE_API_KEY")
         return await create_fallback_result(verbatim, msg_id)
     elif LLM_PROVIDER == "claude" and not claude_client:
@@ -457,7 +463,7 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
     Genera suggerimenti giornalieri.
     """
     # Check if any provider is available
-    if LLM_PROVIDER == "gemini" and not gemini_model_picks:
+    if LLM_PROVIDER == "gemini" and not gemini_client:
         logger.error("Gemini not initialized - missing GOOGLE_API_KEY")
         return None
     elif LLM_PROVIDER == "claude" and not claude_client:
