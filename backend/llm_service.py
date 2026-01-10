@@ -564,3 +564,130 @@ async def get_daily_picks_with_items(date: str) -> Optional[Dict[str, Any]]:
         'total_estimated_time': picks_data.get('total_estimated_time', 0),
         'message': picks_data.get('message', '')
     }
+
+
+async def debug_classify(verbatim: str) -> Dict[str, Any]:
+    """
+    Debug version of classify that returns raw response and metadata.
+    Used for testing API calls in settings.
+    """
+    from config import LLM_PROVIDER, GEMINI_MODEL_CLASSIFY
+
+    result = {
+        "input": verbatim,
+        "raw_response": None,
+        "parsed_json": None,
+        "grounding_metadata": None,
+        "model": None,
+        "error": None
+    }
+
+    try:
+        # Get context
+        user_background = await get_config('user_background', '')
+        recent_items = await get_recent_items(limit=5)
+
+        # Build prompt
+        if LLM_PROVIDER == "gemini":
+            prompt_template = CLASSIFY_PROMPT_GEMINI
+        else:
+            prompt_template = CLASSIFY_PROMPT
+
+        prompt = prompt_template.format(
+            user_background=user_background or "Nessun background impostato",
+            recent_items=json.dumps(recent_items, indent=2, ensure_ascii=False) if recent_items else "Nessun item recente",
+            verbatim_input=verbatim
+        )
+
+        result["prompt_preview"] = prompt[:500] + "..." if len(prompt) > 500 else prompt
+
+        if LLM_PROVIDER == "gemini":
+            result["model"] = GEMINI_MODEL_CLASSIFY
+            debug_result = await debug_classify_gemini(prompt)
+            result.update(debug_result)
+        else:
+            result["model"] = "claude"
+            result["error"] = "Debug not implemented for Claude yet"
+
+    except Exception as e:
+        result["error"] = str(e)
+        result["error_type"] = type(e).__name__
+
+    return result
+
+
+async def debug_classify_gemini(prompt: str) -> Dict[str, Any]:
+    """Debug Gemini classification with full response details."""
+    if not gemini_client:
+        return {"error": "Gemini client not initialized"}
+
+    try:
+        from google.genai import types
+        import asyncio
+
+        # Create Google Search tool for grounding
+        search_tool = types.Tool(google_search=types.GoogleSearch())
+
+        # Configuration with tools and JSON response
+        config = types.GenerateContentConfig(
+            tools=[search_tool],
+            response_mime_type="application/json",
+            max_output_tokens=2000,
+            temperature=0.7
+        )
+
+        # Run sync client in async context
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: gemini_client.models.generate_content(
+                model=GEMINI_MODEL_CLASSIFY,
+                contents=prompt,
+                config=config
+            )
+        )
+
+        result = {
+            "raw_response": response.text if hasattr(response, 'text') else str(response),
+            "parsed_json": None,
+            "grounding_metadata": None,
+            "candidates_info": None
+        }
+
+        # Try to parse JSON
+        if response.text:
+            result["parsed_json"] = extract_json(response.text)
+
+        # Extract grounding metadata if available
+        if hasattr(response, 'candidates') and response.candidates:
+            candidate = response.candidates[0]
+            result["candidates_info"] = {
+                "finish_reason": str(candidate.finish_reason) if hasattr(candidate, 'finish_reason') else None,
+            }
+
+            if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
+                gm = candidate.grounding_metadata
+                result["grounding_metadata"] = {
+                    "search_queries": [q for q in gm.web_search_queries] if hasattr(gm, 'web_search_queries') else [],
+                    "grounding_chunks": len(gm.grounding_chunks) if hasattr(gm, 'grounding_chunks') else 0,
+                    "grounding_supports": len(gm.grounding_supports) if hasattr(gm, 'grounding_supports') else 0,
+                }
+
+                # Extract source URLs from grounding chunks
+                if hasattr(gm, 'grounding_chunks') and gm.grounding_chunks:
+                    sources = []
+                    for chunk in gm.grounding_chunks[:5]:  # Limit to 5
+                        if hasattr(chunk, 'web') and chunk.web:
+                            sources.append({
+                                "uri": chunk.web.uri if hasattr(chunk.web, 'uri') else None,
+                                "title": chunk.web.title if hasattr(chunk.web, 'title') else None
+                            })
+                    result["grounding_metadata"]["sources"] = sources
+
+        return result
+
+    except Exception as e:
+        return {
+            "error": str(e),
+            "error_type": type(e).__name__
+        }

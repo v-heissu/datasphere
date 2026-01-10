@@ -293,6 +293,36 @@ async def send_test_email():
     return {"success": True, "message": "Digest email sent!"}
 
 
+@app.post("/api/debug/test-classify")
+async def debug_test_classify(request: dict):
+    """
+    Debug endpoint to test LLM classification.
+    Returns raw response, parsed JSON, and debug info.
+    """
+    from llm_service import debug_classify
+    from config import LLM_PROVIDER
+
+    input_text = request.get("input", "").strip()
+    if not input_text:
+        raise HTTPException(status_code=400, detail="Input text required")
+
+    try:
+        result = await debug_classify(input_text)
+        return {
+            "success": True,
+            "provider": LLM_PROVIDER,
+            **result
+        }
+    except Exception as e:
+        logger.error(f"Debug classify error: {e}")
+        return {
+            "success": False,
+            "provider": LLM_PROVIDER,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+
+
 # Serve frontend static files
 import os
 # Try multiple possible paths for frontend build

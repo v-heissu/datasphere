@@ -1,6 +1,6 @@
 <script>
 	import { createEventDispatcher, onMount } from 'svelte';
-	import { X, Save, RotateCcw, Settings, User, Bot, Mail, Send, CheckCircle2, AlertCircle } from 'lucide-svelte';
+	import { X, Save, RotateCcw, Settings, User, Bot, Mail, Send, CheckCircle2, AlertCircle, Bug, Play } from 'lucide-svelte';
 
 	export let show = false;
 
@@ -13,6 +13,11 @@
 	let activeTab = 'user';
 	let emailTesting = false;
 	let emailResult = null;
+
+	// Debug/Test API state
+	let testInput = '';
+	let testResult = null;
+	let testing = false;
 
 	const defaultClassifyPrompt = `Sei un assistente per una persona con ADHD che cattura pensieri velocemente.
 
@@ -128,6 +133,24 @@ REGOLE:
 		}
 	}
 
+	async function runApiTest() {
+		if (!testInput.trim()) return;
+		testing = true;
+		testResult = null;
+		try {
+			const res = await fetch('/api/debug/test-classify', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ input: testInput })
+			});
+			testResult = await res.json();
+		} catch (e) {
+			testResult = { success: false, error: 'Errore di connessione: ' + e.message };
+		} finally {
+			testing = false;
+		}
+	}
+
 	function close() {
 		show = false;
 		emailResult = null;
@@ -188,6 +211,16 @@ REGOLE:
 				>
 					<Mail class="w-4 h-4 inline mr-1 sm:mr-2" />
 					Email
+				</button>
+				<button
+					class="flex-1 px-4 sm:px-6 py-3 text-sm font-medium transition-colors border-b-2 whitespace-nowrap {activeTab === 'debug'
+						? 'border-[var(--accent)] text-[var(--accent)]'
+						: 'border-transparent opacity-60 hover:opacity-100'}"
+					on:click={() => (activeTab = 'debug')}
+				>
+					<Bug class="w-4 h-4 inline mr-1 sm:mr-2" />
+					<span class="hidden sm:inline">Debug API</span>
+					<span class="sm:hidden">Debug</span>
 				</button>
 			</div>
 
@@ -294,6 +327,122 @@ REGOLE:
 								WEEKLY_DIGEST_TIME=08:00
 							</code>
 						</div>
+					</div>
+				{:else if activeTab === 'debug'}
+					<div class="space-y-4">
+						<div>
+							<h3 class="text-sm font-medium mb-2">Test API Classification</h3>
+							<p class="text-xs opacity-50 mb-4">
+								Testa la chiamata API di classificazione e visualizza la risposta raw con metadata.
+							</p>
+						</div>
+
+						<div class="flex gap-2">
+							<input
+								type="text"
+								bind:value={testInput}
+								class="input flex-1"
+								placeholder="es: blade runner, faetooth milano..."
+								on:keydown={(e) => e.key === 'Enter' && runApiTest()}
+							/>
+							<button
+								class="btn btn-primary flex-shrink-0"
+								on:click={runApiTest}
+								disabled={testing || !testInput.trim()}
+							>
+								{#if testing}
+									<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+								{:else}
+									<Play class="w-4 h-4" />
+								{/if}
+								Test
+							</button>
+						</div>
+
+						{#if testResult}
+							<div class="space-y-3">
+								<!-- Status -->
+								<div class="flex items-center gap-2">
+									{#if testResult.success}
+										<CheckCircle2 class="w-4 h-4 text-[var(--success)]" />
+										<span class="text-sm text-[var(--success)]">Chiamata riuscita</span>
+									{:else}
+										<AlertCircle class="w-4 h-4 text-[var(--danger)]" />
+										<span class="text-sm text-[var(--danger)]">Errore</span>
+									{/if}
+									{#if testResult.provider}
+										<span class="text-xs opacity-50">Provider: {testResult.provider}</span>
+									{/if}
+									{#if testResult.model}
+										<span class="text-xs opacity-50">Model: {testResult.model}</span>
+									{/if}
+								</div>
+
+								<!-- Error -->
+								{#if testResult.error}
+									<div class="p-3 bg-[var(--danger)]/20 rounded-lg">
+										<p class="text-sm text-[var(--danger)] font-mono break-all">
+											{testResult.error_type ? `[${testResult.error_type}] ` : ''}{testResult.error}
+										</p>
+									</div>
+								{/if}
+
+								<!-- Grounding Metadata -->
+								{#if testResult.grounding_metadata}
+									<div class="card p-3 space-y-2">
+										<h4 class="text-xs font-medium opacity-70">🔍 Grounding Metadata</h4>
+										{#if testResult.grounding_metadata.search_queries?.length}
+											<div>
+												<span class="text-xs opacity-50">Search queries:</span>
+												<div class="flex flex-wrap gap-1 mt-1">
+													{#each testResult.grounding_metadata.search_queries as query}
+														<span class="px-2 py-0.5 bg-[var(--accent)]/20 rounded text-xs">{query}</span>
+													{/each}
+												</div>
+											</div>
+										{/if}
+										{#if testResult.grounding_metadata.sources?.length}
+											<div>
+												<span class="text-xs opacity-50">Sources ({testResult.grounding_metadata.grounding_chunks} chunks):</span>
+												<ul class="mt-1 space-y-1">
+													{#each testResult.grounding_metadata.sources as source}
+														<li class="text-xs">
+															<a href={source.uri} target="_blank" class="text-[var(--accent)] hover:underline">
+																{source.title || source.uri}
+															</a>
+														</li>
+													{/each}
+												</ul>
+											</div>
+										{/if}
+									</div>
+								{/if}
+
+								<!-- Parsed JSON -->
+								{#if testResult.parsed_json}
+									<div class="card p-3 space-y-2">
+										<h4 class="text-xs font-medium opacity-70">✅ Parsed JSON</h4>
+										<pre class="text-xs font-mono bg-black/30 p-3 rounded overflow-x-auto max-h-48 overflow-y-auto">{JSON.stringify(testResult.parsed_json, null, 2)}</pre>
+									</div>
+								{/if}
+
+								<!-- Raw Response -->
+								{#if testResult.raw_response}
+									<details class="card p-3">
+										<summary class="text-xs font-medium opacity-70 cursor-pointer">📄 Raw Response</summary>
+										<pre class="text-xs font-mono bg-black/30 p-3 rounded overflow-x-auto max-h-48 overflow-y-auto mt-2 whitespace-pre-wrap break-all">{testResult.raw_response}</pre>
+									</details>
+								{/if}
+
+								<!-- Prompt Preview -->
+								{#if testResult.prompt_preview}
+									<details class="card p-3">
+										<summary class="text-xs font-medium opacity-70 cursor-pointer">📝 Prompt Preview</summary>
+										<pre class="text-xs font-mono bg-black/30 p-3 rounded overflow-x-auto max-h-48 overflow-y-auto mt-2 whitespace-pre-wrap">{testResult.prompt_preview}</pre>
+									</details>
+								{/if}
+							</div>
+						{/if}
 					</div>
 				{/if}
 			</div>
