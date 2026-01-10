@@ -93,7 +93,13 @@ DEFAULT_CONFIG = {
 def init_database():
     """Initialize database with schema (synchronous, for startup)."""
     import logging
+    from pathlib import Path
     logger = logging.getLogger(__name__)
+
+    # Ensure parent directory exists (important for Railway volumes)
+    db_path = Path(DATABASE_PATH)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
     logger.info(f"Initializing database at: {DATABASE_PATH}")
     conn = sqlite3.connect(DATABASE_PATH)
     conn.executescript(SCHEMA)

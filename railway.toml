@@ -1,3 +1,14 @@
+# Railway Configuration for DataSphere
+#
+# IMPORTANT: Database Persistence Setup
+# To persist data across deploys, you MUST create a Railway Volume:
+# 1. Go to your Railway project dashboard
+# 2. Click on the service -> Settings -> Volumes
+# 3. Add a new volume with mount path: /data
+# 4. Redeploy the service
+#
+# The database will be stored at /data/adhd.db
+
 [build]
 builder = "dockerfile"
 dockerfilePath = "Dockerfile"
