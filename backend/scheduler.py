@@ -15,7 +15,7 @@ from database import (
     get_config, get_items_older_than, update_item_status,
     get_item_by_id
 )
-from claude_service import generate_daily_picks
+from llm_service import generate_daily_picks
 from telegram_bot import send_telegram_message
 from email_service import send_weekly_digest
 

@@ -25,7 +25,7 @@ from database import (
     save_config,
     get_all_config
 )
-from claude_service import generate_daily_picks, get_daily_picks_with_items
+from llm_service import generate_daily_picks, get_daily_picks_with_items
 from telegram_bot import run_bot, create_bot_application
 from scheduler import init_scheduler, start_scheduler, stop_scheduler
 from models import ItemResponse, ItemUpdate, StatsResponse, EnrichmentData

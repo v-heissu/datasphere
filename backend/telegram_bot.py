@@ -17,7 +17,7 @@ from telegram.ext import (
 
 from config import TELEGRAM_BOT_TOKEN, DASHBOARD_URL
 from database import get_config, save_config, get_user_stats, get_daily_picks_for_date
-from claude_service import classify_and_enrich, generate_daily_picks, get_daily_picks_with_items
+from llm_service import classify_and_enrich, generate_daily_picks, get_daily_picks_with_items
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
