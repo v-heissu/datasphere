@@ -1,23 +1,23 @@
 """
-Email service for weekly digest notifications.
+Email service for weekly digest notifications using Resend API.
 """
 
-import smtplib
 import json
 import logging
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import resend
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
 
 from config import (
-    EMAIL_ENABLED, EMAIL_SMTP_HOST, EMAIL_SMTP_PORT,
-    EMAIL_USERNAME, EMAIL_PASSWORD, EMAIL_FROM, EMAIL_TO,
-    DASHBOARD_URL
+    EMAIL_ENABLED, EMAIL_FROM, EMAIL_TO,
+    DASHBOARD_URL, RESEND_API_KEY
 )
 from database import get_db
 
 logger = logging.getLogger(__name__)
+
+# Configure Resend
+resend.api_key = RESEND_API_KEY
 
 
 async def get_weekly_items() -> Dict[str, Any]:
@@ -297,13 +297,13 @@ Cattura. Classifica. Consuma.
 
 
 async def send_weekly_digest() -> bool:
-    """Send the weekly digest email."""
+    """Send the weekly digest email using Resend API."""
     if not EMAIL_ENABLED:
         logger.info("Email not enabled, skipping weekly digest")
         return False
 
-    if not all([EMAIL_USERNAME, EMAIL_PASSWORD, EMAIL_FROM, EMAIL_TO]):
-        logger.error("Email configuration incomplete")
+    if not all([RESEND_API_KEY, EMAIL_FROM, EMAIL_TO]):
+        logger.error("Email configuration incomplete. Need RESEND_API_KEY, EMAIL_FROM, EMAIL_TO")
         return False
 
     try:
@@ -314,43 +314,22 @@ async def send_weekly_digest() -> bool:
             logger.info("No items this week, skipping digest")
             return False
 
-        # Build email
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = f"🧠 Weekly Brain Dump • {data['total']} pensieri catturati"
-        msg['From'] = EMAIL_FROM
-        msg['To'] = EMAIL_TO
-
-        # Attach both plain text and HTML versions
-        text_content = build_text_email(data)
+        # Build email content
         html_content = build_html_email(data)
+        text_content = build_text_email(data)
 
-        msg.attach(MIMEText(text_content, 'plain', 'utf-8'))
-        msg.attach(MIMEText(html_content, 'html', 'utf-8'))
+        # Send via Resend API
+        params = {
+            "from": EMAIL_FROM,
+            "to": [EMAIL_TO],
+            "subject": f"🧠 Weekly Brain Dump • {data['total']} pensieri catturati",
+            "html": html_content,
+            "text": text_content
+        }
 
-        # Send email - try SSL first (port 465), then TLS (port 587)
-        try:
-            if EMAIL_SMTP_PORT == 465:
-                # SSL connection
-                with smtplib.SMTP_SSL(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=30) as server:
-                    server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
-                    server.send_message(msg)
-            else:
-                # TLS connection (port 587)
-                with smtplib.SMTP(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=30) as server:
-                    server.starttls()
-                    server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
-                    server.send_message(msg)
-        except OSError as e:
-            # If network unreachable, try alternative port
-            logger.warning(f"Primary SMTP failed: {e}, trying alternative...")
-            if EMAIL_SMTP_PORT == 587:
-                with smtplib.SMTP_SSL(EMAIL_SMTP_HOST, 465, timeout=30) as server:
-                    server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
-                    server.send_message(msg)
-            else:
-                raise
+        email = resend.Emails.send(params)
 
-        logger.info(f"Weekly digest sent successfully to {EMAIL_TO}")
+        logger.info(f"Weekly digest sent successfully to {EMAIL_TO}, id: {email.get('id', 'unknown')}")
         return True
 
     except Exception as e:
