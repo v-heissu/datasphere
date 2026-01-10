@@ -92,6 +92,9 @@ DEFAULT_CONFIG = {
 
 def init_database():
     """Initialize database with schema (synchronous, for startup)."""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Initializing database at: {DATABASE_PATH}")
     conn = sqlite3.connect(DATABASE_PATH)
     conn.executescript(SCHEMA)
 
