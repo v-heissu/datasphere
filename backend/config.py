@@ -15,7 +15,16 @@ BASE_DIR = Path(__file__).parent
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
-# Claude API
+# LLM Provider Selection ("gemini" or "claude")
+# Gemini 2.0 Flash is FREE (1500 req/day) with native Google Search
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
+
+# Gemini API (recommended - FREE tier available)
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+GEMINI_MODEL_CLASSIFY = os.getenv("GEMINI_MODEL_CLASSIFY", "gemini-2.0-flash")
+GEMINI_MODEL_PICKS = os.getenv("GEMINI_MODEL_PICKS", "gemini-2.0-flash")
+
+# Claude API (fallback option)
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
 CLAUDE_MODEL_CLASSIFY = os.getenv("CLAUDE_MODEL_CLASSIFY", "claude-sonnet-4-20250514")
 CLAUDE_MODEL_PICKS = os.getenv("CLAUDE_MODEL_PICKS", "claude-3-5-haiku-20241022")

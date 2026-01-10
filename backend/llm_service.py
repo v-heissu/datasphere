@@ -1,5 +1,6 @@
 """
-Claude AI service for classification and enrichment.
+LLM service for classification and enrichment.
+Supports both Gemini (recommended - FREE) and Claude (fallback).
 """
 
 import json
@@ -8,9 +9,12 @@ import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-import anthropic
-
-from config import CLAUDE_API_KEY, CLAUDE_MODEL_CLASSIFY, CLAUDE_MODEL_PICKS, DASHBOARD_URL
+from config import (
+    LLM_PROVIDER,
+    GOOGLE_API_KEY, GEMINI_MODEL_CLASSIFY, GEMINI_MODEL_PICKS,
+    CLAUDE_API_KEY, CLAUDE_MODEL_CLASSIFY, CLAUDE_MODEL_PICKS,
+    DASHBOARD_URL
+)
 from database import (
     get_config, get_recent_items, save_item, get_pending_items_for_picks,
     get_stats_last_7_days, save_daily_picks, get_item_by_id
@@ -19,8 +23,28 @@ from models import ItemClassification, DailyPicksResult
 
 logger = logging.getLogger(__name__)
 
-# Initialize Claude client
-client = anthropic.Anthropic(api_key=CLAUDE_API_KEY) if CLAUDE_API_KEY else None
+# Initialize clients based on provider
+gemini_model_classify = None
+gemini_model_picks = None
+claude_client = None
+
+if LLM_PROVIDER == "gemini" and GOOGLE_API_KEY:
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=GOOGLE_API_KEY)
+        gemini_model_classify = genai.GenerativeModel(GEMINI_MODEL_CLASSIFY)
+        gemini_model_picks = genai.GenerativeModel(GEMINI_MODEL_PICKS)
+        logger.info(f"Initialized Gemini models: {GEMINI_MODEL_CLASSIFY}, {GEMINI_MODEL_PICKS}")
+    except Exception as e:
+        logger.error(f"Failed to initialize Gemini: {e}")
+
+if LLM_PROVIDER == "claude" and CLAUDE_API_KEY:
+    try:
+        import anthropic
+        claude_client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+        logger.info(f"Initialized Claude client")
+    except Exception as e:
+        logger.error(f"Failed to initialize Claude: {e}")
 
 # Prompt templates
 CLASSIFY_PROMPT = """
@@ -60,6 +84,52 @@ REGOLE:
 - Sii generoso nell'interpretazione (preferisci classificare che "other")
 - Se ambiguo, usa il background utente per disambiguare
 - Trova almeno 1-2 link utili (IMDb, Spotify, Wikipedia, articoli, etc)
+- Stima tempo realisticamente (film=120min, concept=15-30min, libro=varie ore)
+- Priorità basata su: urgenza inferita, complessità, interesse utente
+- Tag: max 3-4, semantici (es: "sci-fi", "philosophy", "ambient-music")
+- RISPONDI SOLO CON IL JSON, niente altro testo prima o dopo
+"""
+
+# Gemini-specific prompt with search instruction
+CLASSIFY_PROMPT_GEMINI = """
+Sei un assistente per una persona con ADHD che cattura pensieri velocemente.
+
+USER BACKGROUND:
+{user_background}
+
+RECENT CONTEXT (ultimi 5 pensieri):
+{recent_items}
+
+INPUT UTENTE:
+"{verbatim_input}"
+
+TASK:
+1. CERCA SU WEB per identificare esattamente cosa sia l'input
+2. Classifica il tipo di pensiero
+3. Estrai/inferisci il titolo corretto (es: se l'utente scrive "blade runner" -> "Blade Runner 2049" o "Blade Runner")
+4. Fornisci link utili REALI trovati nella ricerca (IMDb, Goodreads, Wikipedia, Spotify, etc)
+5. Stima tempo necessario per consumare
+6. Assegna priorità basata su interesse/urgenza
+
+OUTPUT (JSON puro, senza markdown):
+{{
+  "type": "film|book|concept|music|art|todo|other",
+  "title": "titolo estratto/inferito",
+  "description": "cosa significa questo pensiero (1-2 frasi)",
+  "links": [
+    {{"url": "...", "type": "imdb|spotify|wikipedia|article|..."}}
+  ],
+  "estimated_minutes": 30,
+  "priority": 3,
+  "tags": ["tag1", "tag2"],
+  "consumption_suggestion": "come/quando consumarlo"
+}}
+
+REGOLE:
+- CERCA SEMPRE prima di classificare
+- Sii generoso nell'interpretazione (preferisci classificare che "other")
+- Se ambiguo, usa il background utente per disambiguare
+- Link da fonti autorevoli trovate nella ricerca
 - Stima tempo realisticamente (film=120min, concept=15-30min, libro=varie ore)
 - Priorità basata su: urgenza inferita, complessità, interesse utente
 - Tag: max 3-4, semantici (es: "sci-fi", "philosophy", "ambient-music")
@@ -135,32 +205,44 @@ def extract_json(text: str) -> Optional[Dict]:
     return None
 
 
-async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Dict[str, Any]:
-    """
-    Classifica e arricchisce un pensiero usando Claude con tool use.
-    """
-    if not client:
-        logger.error("Claude client not initialized - missing API key")
-        return create_fallback_result(verbatim, msg_id)
+async def classify_with_gemini(prompt: str) -> Optional[Dict]:
+    """Classify using Gemini with Google Search grounding."""
+    if not gemini_model_classify:
+        logger.error("Gemini model not initialized")
+        return None
 
     try:
-        # Get context
-        user_background = await get_config('user_background', '')
-        recent_items = await get_recent_items(limit=5)
+        import google.generativeai as genai
 
-        # Get custom prompt if configured, otherwise use default
-        custom_prompt = await get_config('classify_prompt', '')
-        prompt_template = custom_prompt if custom_prompt else CLASSIFY_PROMPT
-
-        # Format prompt
-        prompt = prompt_template.format(
-            user_background=user_background or "Nessun background impostato",
-            recent_items=json.dumps(recent_items, indent=2, ensure_ascii=False) if recent_items else "Nessun item recente",
-            verbatim_input=verbatim
+        # Use Google Search grounding for better results
+        response = gemini_model_classify.generate_content(
+            prompt,
+            tools='google_search_retrieval',
+            generation_config=genai.GenerationConfig(
+                max_output_tokens=2000,
+                temperature=0.7
+            )
         )
 
-        # Call Claude Sonnet with web_search for classification
-        response = client.messages.create(
+        if response.text:
+            return extract_json(response.text)
+        return None
+
+    except Exception as e:
+        logger.error(f"Gemini classification error: {e}")
+        return None
+
+
+async def classify_with_claude(prompt: str) -> Optional[Dict]:
+    """Classify using Claude with web search."""
+    if not claude_client:
+        logger.error("Claude client not initialized")
+        return None
+
+    try:
+        import anthropic
+
+        response = claude_client.messages.create(
             model=CLAUDE_MODEL_CLASSIFY,
             max_tokens=2000,
             tools=[
@@ -171,16 +253,112 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
             ]
         )
 
-        # Extract result from response
-        result = None
         for block in response.content:
             if block.type == "text":
                 result = extract_json(block.text)
                 if result:
-                    break
+                    return result
+        return None
+
+    except Exception as e:
+        logger.error(f"Claude classification error: {e}")
+        return None
+
+
+async def generate_picks_with_gemini(prompt: str) -> Optional[Dict]:
+    """Generate daily picks using Gemini."""
+    if not gemini_model_picks:
+        logger.error("Gemini model not initialized")
+        return None
+
+    try:
+        import google.generativeai as genai
+
+        response = gemini_model_picks.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                max_output_tokens=1500,
+                temperature=0.7
+            )
+        )
+
+        if response.text:
+            return extract_json(response.text)
+        return None
+
+    except Exception as e:
+        logger.error(f"Gemini picks error: {e}")
+        return None
+
+
+async def generate_picks_with_claude(prompt: str) -> Optional[Dict]:
+    """Generate daily picks using Claude."""
+    if not claude_client:
+        logger.error("Claude client not initialized")
+        return None
+
+    try:
+        response = claude_client.messages.create(
+            model=CLAUDE_MODEL_PICKS,
+            max_tokens=1500,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        for block in response.content:
+            if block.type == "text":
+                result = extract_json(block.text)
+                if result:
+                    return result
+        return None
+
+    except Exception as e:
+        logger.error(f"Claude picks error: {e}")
+        return None
+
+
+async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Classifica e arricchisce un pensiero usando l'LLM configurato.
+    """
+    # Check if any provider is available
+    if LLM_PROVIDER == "gemini" and not gemini_model_classify:
+        logger.error("Gemini not initialized - missing GOOGLE_API_KEY")
+        return await create_fallback_result(verbatim, msg_id)
+    elif LLM_PROVIDER == "claude" and not claude_client:
+        logger.error("Claude not initialized - missing CLAUDE_API_KEY")
+        return await create_fallback_result(verbatim, msg_id)
+
+    try:
+        # Get context
+        user_background = await get_config('user_background', '')
+        recent_items = await get_recent_items(limit=5)
+
+        # Get custom prompt if configured, otherwise use default
+        custom_prompt = await get_config('classify_prompt', '')
+
+        # Use Gemini-specific prompt if using Gemini (includes search instruction)
+        if LLM_PROVIDER == "gemini":
+            prompt_template = custom_prompt if custom_prompt else CLASSIFY_PROMPT_GEMINI
+        else:
+            prompt_template = custom_prompt if custom_prompt else CLASSIFY_PROMPT
+
+        # Format prompt
+        prompt = prompt_template.format(
+            user_background=user_background or "Nessun background impostato",
+            recent_items=json.dumps(recent_items, indent=2, ensure_ascii=False) if recent_items else "Nessun item recente",
+            verbatim_input=verbatim
+        )
+
+        # Call appropriate LLM
+        if LLM_PROVIDER == "gemini":
+            result = await classify_with_gemini(prompt)
+        else:
+            result = await classify_with_claude(prompt)
 
         if not result:
-            logger.warning(f"Failed to parse Claude response for: {verbatim[:50]}")
+            logger.warning(f"Failed to parse LLM response for: {verbatim[:50]}")
             return await create_fallback_result(verbatim, msg_id)
 
         # Validate and normalize result
@@ -205,9 +383,6 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
         result['id'] = item_id
         return result
 
-    except anthropic.APIError as e:
-        logger.error(f"Claude API error: {e}")
-        return await create_fallback_result(verbatim, msg_id)
     except Exception as e:
         logger.error(f"Error classifying thought: {e}")
         return await create_fallback_result(verbatim, msg_id)
@@ -266,8 +441,12 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
     """
     Genera suggerimenti giornalieri.
     """
-    if not client:
-        logger.error("Claude client not initialized - missing API key")
+    # Check if any provider is available
+    if LLM_PROVIDER == "gemini" and not gemini_model_picks:
+        logger.error("Gemini not initialized - missing GOOGLE_API_KEY")
+        return None
+    elif LLM_PROVIDER == "claude" and not claude_client:
+        logger.error("Claude not initialized - missing CLAUDE_API_KEY")
         return None
 
     try:
@@ -291,22 +470,11 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
             recent_captured=recent_stats['captured']
         )
 
-        # Use Haiku for daily picks (faster and cheaper)
-        response = client.messages.create(
-            model=CLAUDE_MODEL_PICKS,
-            max_tokens=1500,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-
-        # Parse response
-        result = None
-        for block in response.content:
-            if block.type == "text":
-                result = extract_json(block.text)
-                if result:
-                    break
+        # Call appropriate LLM
+        if LLM_PROVIDER == "gemini":
+            result = await generate_picks_with_gemini(prompt)
+        else:
+            result = await generate_picks_with_claude(prompt)
 
         if not result or 'picks' not in result:
             logger.warning("Failed to parse daily picks response")
@@ -346,9 +514,6 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
             'message': result.get('message', 'Buona giornata!')
         }
 
-    except anthropic.APIError as e:
-        logger.error(f"Claude API error generating picks: {e}")
-        return None
     except Exception as e:
         logger.error(f"Error generating daily picks: {e}")
         return None
