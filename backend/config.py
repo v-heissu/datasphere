@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Base paths
-BASE_DIR = Path(__file__).parent.parent
+BASE_DIR = Path(__file__).parent
 
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -20,8 +20,8 @@ CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
 CLAUDE_MODEL_CLASSIFY = os.getenv("CLAUDE_MODEL_CLASSIFY", "claude-sonnet-4-20250514")
 CLAUDE_MODEL_PICKS = os.getenv("CLAUDE_MODEL_PICKS", "claude-3-5-haiku-20241022")
 
-# Database - use local path by default, or DATABASE_PATH env var for persistence
-DATABASE_PATH = os.getenv("DATABASE_PATH", str(BASE_DIR / "backend" / "adhd.db"))
+# Database - use local path in backend folder
+DATABASE_PATH = os.getenv("DATABASE_PATH", str(BASE_DIR / "adhd.db"))
 
 # Scheduler defaults
 DAILY_PICKS_TIME = os.getenv("DAILY_PICKS_TIME", "08:00")
