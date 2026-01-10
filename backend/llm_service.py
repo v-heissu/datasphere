@@ -25,15 +25,14 @@ from database import (
 logger = logging.getLogger(__name__)
 
 # Initialize clients based on provider
-gemini_model = None
+gemini_client = None
 claude_client = None
 
 if LLM_PROVIDER == "gemini" and GOOGLE_API_KEY:
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=GOOGLE_API_KEY)
-        gemini_model = genai.GenerativeModel(GEMINI_MODEL_CLASSIFY)
-        logger.info(f"Initialized Gemini: {GEMINI_MODEL_CLASSIFY}")
+        from google import genai
+        gemini_client = genai.Client(api_key=GOOGLE_API_KEY)
+        logger.info(f"Initialized Gemini client for model: {GEMINI_MODEL_CLASSIFY}")
     except Exception as e:
         logger.error(f"Failed to initialize Gemini: {e}")
 
@@ -184,44 +183,39 @@ def extract_json(text: str) -> Optional[Dict]:
 
 async def classify_with_gemini(prompt: str) -> Optional[Dict]:
     """Classify using Gemini with Google Search grounding."""
-    if not gemini_model:
-        logger.error("Gemini model not initialized")
+    if not gemini_client:
+        logger.error("Gemini client not initialized")
         return None
 
     try:
-        import google.generativeai as genai
+        from google.genai.types import GenerateContentConfig, GoogleSearch, Tool
 
-        # Generation config - NOTE: Cannot use response_mime_type="application/json"
-        # together with search grounding. The extract_json() function will parse
-        # the JSON from the text response instead.
-        generation_config = genai.GenerationConfig(
-            temperature=0.7,
-            max_output_tokens=2000
+        # Generate content with Google Search grounding
+        # NOTE: Cannot use response_mime_type with search grounding
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL_CLASSIFY,
+            contents=prompt,
+            config=GenerateContentConfig(
+                temperature=0.7,
+                max_output_tokens=2000,
+                tools=[Tool(google_search=GoogleSearch())]
+            )
         )
 
-        # Enable Google Search grounding using google_search tool
-        # Syntax: tools="google_search" for simple grounding
-        # Generate content with search grounding
-        response = gemini_model.generate_content(
-            prompt,
-            generation_config=generation_config,
-            tools="google_search"
-        )
-        
         if not response or not response.text:
             logger.error("Empty response from Gemini")
             return None
-        
+
         # Parse JSON from response
         result = extract_json(response.text)
-        
+
         if not result:
             logger.warning(f"Failed to parse Gemini JSON: {response.text[:200]}")
             return None
-        
+
         logger.info(f"Successfully classified with Gemini: {result.get('title', 'unknown')}")
         return result
-        
+
     except Exception as e:
         logger.error(f"Gemini classification error: {e}", exc_info=True)
         return None
@@ -262,27 +256,24 @@ async def classify_with_claude(prompt: str) -> Optional[Dict]:
 
 async def generate_picks_with_gemini(prompt: str) -> Optional[Dict]:
     """Generate daily picks using Gemini (no search needed)."""
-    if not gemini_model:
-        logger.error("Gemini model not initialized")
+    if not gemini_client:
+        logger.error("Gemini client not initialized")
         return None
 
     try:
-        import google.generativeai as genai
-        
-        # Use picks model
-        picks_model = genai.GenerativeModel(GEMINI_MODEL_PICKS)
-        
-        generation_config = genai.GenerationConfig(
-            temperature=0.7,
-            max_output_tokens=1500,
-            response_mime_type="application/json"
+        from google.genai.types import GenerateContentConfig
+
+        # No search grounding for picks - can use JSON response mode
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL_PICKS,
+            contents=prompt,
+            config=GenerateContentConfig(
+                temperature=0.7,
+                max_output_tokens=1500,
+                response_mime_type="application/json"
+            )
         )
-        
-        response = picks_model.generate_content(
-            prompt,
-            generation_config=generation_config
-        )
-        
+
         if response and response.text:
             return extract_json(response.text)
         return None
@@ -326,7 +317,7 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
     logger.info(f"Classifying: {verbatim[:50]}... with {LLM_PROVIDER}")
     
     # Check if any provider is available
-    if LLM_PROVIDER == "gemini" and not gemini_model:
+    if LLM_PROVIDER == "gemini" and not gemini_client:
         logger.error("Gemini not initialized - missing GOOGLE_API_KEY")
         return await create_fallback_result(verbatim, msg_id)
     elif LLM_PROVIDER == "claude" and not claude_client:
@@ -443,7 +434,7 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
     """Genera suggerimenti giornalieri."""
     logger.info(f"Generating daily picks with {LLM_PROVIDER}")
     
-    if LLM_PROVIDER == "gemini" and not gemini_model:
+    if LLM_PROVIDER == "gemini" and not gemini_client:
         logger.error("Gemini not initialized")
         return None
     elif LLM_PROVIDER == "claude" and not claude_client:
@@ -573,22 +564,20 @@ async def debug_classify(verbatim: str) -> Dict[str, Any]:
     }
 
     if LLM_PROVIDER == "gemini":
-        if not gemini_model:
-            raise Exception("Gemini model not initialized")
+        if not gemini_client:
+            raise Exception("Gemini client not initialized")
 
-        import google.generativeai as genai
+        from google.genai.types import GenerateContentConfig, GoogleSearch, Tool
 
-        # Generation config - NO JSON mode when using search grounding
-        generation_config = genai.GenerationConfig(
-            temperature=0.7,
-            max_output_tokens=2000
-        )
-
-        # Generate content with search grounding
-        response = gemini_model.generate_content(
-            prompt,
-            generation_config=generation_config,
-            tools="google_search"
+        # Generate content with Google Search grounding
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL_CLASSIFY,
+            contents=prompt,
+            config=GenerateContentConfig(
+                temperature=0.7,
+                max_output_tokens=2000,
+                tools=[Tool(google_search=GoogleSearch())]
+            )
         )
 
         if response and response.text:
