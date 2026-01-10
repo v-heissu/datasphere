@@ -20,8 +20,8 @@ CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
 CLAUDE_MODEL_CLASSIFY = os.getenv("CLAUDE_MODEL_CLASSIFY", "claude-sonnet-4-20250514")
 CLAUDE_MODEL_PICKS = os.getenv("CLAUDE_MODEL_PICKS", "claude-3-5-haiku-20241022")
 
-# Database - use local path in backend folder
-DATABASE_PATH = os.getenv("DATABASE_PATH", str(BASE_DIR / "adhd.db"))
+# Database - use /tmp for writable storage in containers
+DATABASE_PATH = os.getenv("DATABASE_PATH", "/tmp/adhd.db")
 
 # Scheduler defaults
 DAILY_PICKS_TIME = os.getenv("DAILY_PICKS_TIME", "08:00")
