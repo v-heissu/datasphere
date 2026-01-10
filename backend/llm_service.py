@@ -190,18 +190,19 @@ async def classify_with_gemini(prompt: str) -> Optional[Dict]:
 
     try:
         import google.generativeai as genai
-        
-        # Generation config
+
+        # Generation config - NOTE: Cannot use response_mime_type="application/json"
+        # together with search grounding. The extract_json() function will parse
+        # the JSON from the text response instead.
         generation_config = genai.GenerationConfig(
             temperature=0.7,
-            max_output_tokens=2000,
-            response_mime_type="application/json"
+            max_output_tokens=2000
         )
-        
+
         # Enable Google Search grounding
         # This is the CORRECT syntax for the stable library
         tools = [{"google_search_retrieval": {}}]
-        
+
         # Generate content
         response = gemini_model.generate_content(
             prompt,
@@ -541,3 +542,118 @@ async def get_daily_picks_with_items(date: str) -> Optional[Dict[str, Any]]:
         'total_estimated_time': picks_data.get('total_estimated_time', 0),
         'message': picks_data.get('message', '')
     }
+
+
+async def debug_classify(verbatim: str) -> Dict[str, Any]:
+    """
+    Debug classification - returns raw response, parsed JSON, and grounding metadata.
+    Used by the debug API tab in settings.
+    """
+    from config import LLM_PROVIDER, GEMINI_MODEL_CLASSIFY
+
+    # Build prompt
+    user_background = await get_config('user_background', '')
+    recent_items = await get_recent_items(limit=5)
+
+    if LLM_PROVIDER == "gemini":
+        prompt_template = CLASSIFY_PROMPT_GEMINI
+    else:
+        prompt_template = CLASSIFY_PROMPT_CLAUDE
+
+    prompt = prompt_template.format(
+        user_background=user_background or "Nessun background impostato",
+        recent_items=json.dumps(recent_items, indent=2, ensure_ascii=False) if recent_items else "Nessun item recente",
+        verbatim_input=verbatim
+    )
+
+    result = {
+        'model': GEMINI_MODEL_CLASSIFY if LLM_PROVIDER == "gemini" else CLAUDE_MODEL_CLASSIFY,
+        'prompt_preview': prompt[:500] + ('...' if len(prompt) > 500 else ''),
+        'raw_response': None,
+        'parsed_json': None,
+        'grounding_metadata': None
+    }
+
+    if LLM_PROVIDER == "gemini":
+        if not gemini_model:
+            raise Exception("Gemini model not initialized")
+
+        import google.generativeai as genai
+
+        # Generation config - NO JSON mode when using search grounding
+        generation_config = genai.GenerationConfig(
+            temperature=0.7,
+            max_output_tokens=2000
+        )
+
+        # Enable Google Search grounding
+        tools = [{"google_search_retrieval": {}}]
+
+        # Generate content
+        response = gemini_model.generate_content(
+            prompt,
+            generation_config=generation_config,
+            tools=tools
+        )
+
+        if response and response.text:
+            result['raw_response'] = response.text
+            result['parsed_json'] = extract_json(response.text)
+
+        # Extract grounding metadata if available
+        if response and hasattr(response, 'candidates') and response.candidates:
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
+                gm = candidate.grounding_metadata
+                grounding_info = {
+                    'search_queries': [],
+                    'sources': [],
+                    'grounding_chunks': 0
+                }
+
+                # Extract search queries
+                if hasattr(gm, 'web_search_queries') and gm.web_search_queries:
+                    grounding_info['search_queries'] = list(gm.web_search_queries)
+
+                # Extract grounding chunks/sources
+                if hasattr(gm, 'grounding_chunks') and gm.grounding_chunks:
+                    grounding_info['grounding_chunks'] = len(gm.grounding_chunks)
+                    for chunk in gm.grounding_chunks:
+                        if hasattr(chunk, 'web') and chunk.web:
+                            grounding_info['sources'].append({
+                                'uri': chunk.web.uri if hasattr(chunk.web, 'uri') else '',
+                                'title': chunk.web.title if hasattr(chunk.web, 'title') else ''
+                            })
+
+                # Alternative: grounding_supports may contain source info
+                if hasattr(gm, 'grounding_supports') and gm.grounding_supports:
+                    for support in gm.grounding_supports:
+                        if hasattr(support, 'grounding_chunk_indices'):
+                            pass  # Info already in grounding_chunks
+
+                if grounding_info['search_queries'] or grounding_info['sources']:
+                    result['grounding_metadata'] = grounding_info
+
+    else:
+        # Claude path
+        if not claude_client:
+            raise Exception("Claude client not initialized")
+
+        response = claude_client.messages.create(
+            model=CLAUDE_MODEL_CLASSIFY,
+            max_tokens=2000,
+            tools=[
+                {"type": "web_search_20250305", "name": "web_search"}
+            ],
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        for block in response.content:
+            if block.type == "text":
+                result['raw_response'] = block.text
+                result['parsed_json'] = extract_json(block.text)
+                break
+
+    return result
