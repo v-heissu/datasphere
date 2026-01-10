@@ -214,17 +214,17 @@ async def classify_with_gemini(prompt: str) -> Optional[Dict]:
     try:
         import google.generativeai as genai
 
-        # Use Google Search grounding for better results
-        # Gemini 2.0 requires using genai.protos for google_search tool
-        google_search_tool = genai.protos.Tool(
-            google_search=genai.protos.GoogleSearch()
-        )
-        response = gemini_model_classify.generate_content(
+        # Simplified Google Search tool syntax for Gemini 2.0
+        tools = [{'google_search': {}}]
+
+        # Use async version for proper async/await handling
+        response = await gemini_model_classify.generate_content_async(
             prompt,
-            tools=[google_search_tool],
+            tools=tools,
             generation_config=genai.GenerationConfig(
                 max_output_tokens=2000,
-                temperature=0.7
+                temperature=0.7,
+                response_mime_type="application/json"
             )
         )
 
@@ -278,11 +278,13 @@ async def generate_picks_with_gemini(prompt: str) -> Optional[Dict]:
     try:
         import google.generativeai as genai
 
-        response = gemini_model_picks.generate_content(
+        # Use async version for proper async/await handling
+        response = await gemini_model_picks.generate_content_async(
             prompt,
             generation_config=genai.GenerationConfig(
                 max_output_tokens=1500,
-                temperature=0.7
+                temperature=0.7,
+                response_mime_type="application/json"
             )
         )
 
