@@ -213,19 +213,26 @@ async def classify_with_gemini(prompt: str) -> Optional[Dict]:
 
     try:
         import google.generativeai as genai
+        # Import protos for explicit tool definition to avoid parsing errors
+        from google.generativeai import protos
+        from google.api_core import retry
 
-        # Simplified Google Search tool syntax for Gemini 2.0
-        tools = [{'google_search': {}}]
+        # Explicit Tool definition using protos (more robust than dict syntax)
+        # This prevents SDK from confusing google_search with a function declaration
+        search_tool = protos.Tool(
+            google_search=protos.GoogleSearch()
+        )
 
-        # Use async version for proper async/await handling
         response = await gemini_model_classify.generate_content_async(
             prompt,
-            tools=tools,
+            tools=[search_tool],
             generation_config=genai.GenerationConfig(
                 max_output_tokens=2000,
                 temperature=0.7,
                 response_mime_type="application/json"
-            )
+            ),
+            # Retry policy for network timeouts
+            request_options={'retry': retry.Retry(predicate=retry.if_transient_error)}
         )
 
         if response.text:
@@ -234,6 +241,8 @@ async def classify_with_gemini(prompt: str) -> Optional[Dict]:
 
     except Exception as e:
         logger.error(f"Gemini classification error: {e}")
+        if hasattr(e, 'response') and hasattr(e.response, 'prompt_feedback'):
+            logger.error(f"Safety feedback: {e.response.prompt_feedback}")
         return None
 
 
