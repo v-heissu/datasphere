@@ -36,12 +36,8 @@ COPY backend/ ./backend/
 # Copy built frontend from previous stage
 COPY --from=frontend-builder /app/frontend/build ./frontend/build
 
-# Create data directory
-RUN mkdir -p /data
-
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV DATABASE_PATH=/data/adhd.db
 
 # Expose port
 EXPOSE 8000

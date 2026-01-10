@@ -11,10 +11,6 @@ load_dotenv()
 
 # Base paths
 BASE_DIR = Path(__file__).parent.parent
-DATA_DIR = Path(os.getenv("DATABASE_PATH", "/data")).parent
-
-# Ensure data directory exists
-DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -24,8 +20,8 @@ CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
 CLAUDE_MODEL_CLASSIFY = os.getenv("CLAUDE_MODEL_CLASSIFY", "claude-sonnet-4-20250514")
 CLAUDE_MODEL_PICKS = os.getenv("CLAUDE_MODEL_PICKS", "claude-3-5-haiku-20241022")
 
-# Database
-DATABASE_PATH = os.getenv("DATABASE_PATH", str(DATA_DIR / "adhd.db"))
+# Database - use local path by default, or DATABASE_PATH env var for persistence
+DATABASE_PATH = os.getenv("DATABASE_PATH", str(BASE_DIR / "backend" / "adhd.db"))
 
 # Scheduler defaults
 DAILY_PICKS_TIME = os.getenv("DAILY_PICKS_TIME", "08:00")
