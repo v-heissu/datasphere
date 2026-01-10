@@ -213,12 +213,14 @@ async def classify_with_gemini(prompt: str) -> Optional[Dict]:
 
     try:
         import google.generativeai as genai
+        from google.generativeai.types import Tool
 
         # Use Google Search grounding for better results
-        # Gemini 2.0 uses 'google_search' tool format
+        # Gemini 2.0 requires using the Tool class with google_search
+        google_search_tool = Tool(google_search={})
         response = gemini_model_classify.generate_content(
             prompt,
-            tools=[{'google_search': {}}],
+            tools=[google_search_tool],
             generation_config=genai.GenerationConfig(
                 max_output_tokens=2000,
                 temperature=0.7
