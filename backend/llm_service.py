@@ -199,15 +199,13 @@ async def classify_with_gemini(prompt: str) -> Optional[Dict]:
             max_output_tokens=2000
         )
 
-        # Enable Google Search grounding
-        # This is the CORRECT syntax for the stable library
-        tools = [{"google_search_retrieval": {}}]
-
-        # Generate content
+        # Enable Google Search grounding using google_search tool
+        # Syntax: tools="google_search" for simple grounding
+        # Generate content with search grounding
         response = gemini_model.generate_content(
             prompt,
             generation_config=generation_config,
-            tools=tools
+            tools="google_search"
         )
         
         if not response or not response.text:
@@ -586,14 +584,11 @@ async def debug_classify(verbatim: str) -> Dict[str, Any]:
             max_output_tokens=2000
         )
 
-        # Enable Google Search grounding
-        tools = [{"google_search_retrieval": {}}]
-
-        # Generate content
+        # Generate content with search grounding
         response = gemini_model.generate_content(
             prompt,
             generation_config=generation_config,
-            tools=tools
+            tools="google_search"
         )
 
         if response and response.text:
