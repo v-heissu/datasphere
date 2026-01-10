@@ -295,12 +295,27 @@ async def send_test_email():
 
 # Serve frontend static files
 import os
-frontend_build_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'build')
+# Try multiple possible paths for frontend build
+possible_paths = [
+    '/app/frontend/build',  # Docker absolute path
+    os.path.join(os.path.dirname(__file__), '..', 'frontend', 'build'),  # Relative path
+]
+
+frontend_build_path = None
+for path in possible_paths:
+    if os.path.exists(path) and os.path.isdir(path):
+        frontend_build_path = path
+        break
+
+logger.info(f"Frontend build path: {frontend_build_path}")
+logger.info(f"Checked paths: {possible_paths}")
 
 # Check if frontend build exists
-if os.path.exists(frontend_build_path):
+if frontend_build_path:
+    logger.info(f"Mounting frontend from: {frontend_build_path}")
     app.mount("/", StaticFiles(directory=frontend_build_path, html=True), name="frontend")
 else:
+    logger.warning("Frontend build not found!")
     # Fallback: serve a simple HTML page
     @app.get("/")
     async def root():
