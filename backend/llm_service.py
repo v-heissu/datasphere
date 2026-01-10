@@ -1,6 +1,8 @@
 """
 LLM service for classification and enrichment.
 Supports both Gemini (recommended - FREE) and Claude (fallback).
+
+FIXED VERSION - Working Gemini API calls
 """
 
 import json
@@ -19,19 +21,19 @@ from database import (
     get_config, get_recent_items, save_item, get_pending_items_for_picks,
     get_stats_last_7_days, save_daily_picks, get_item_by_id
 )
-from models import ItemClassification, DailyPicksResult
 
 logger = logging.getLogger(__name__)
 
 # Initialize clients based on provider
-gemini_client = None
+gemini_model = None
 claude_client = None
 
 if LLM_PROVIDER == "gemini" and GOOGLE_API_KEY:
     try:
-        from google import genai
-        gemini_client = genai.Client(api_key=GOOGLE_API_KEY)
-        logger.info(f"Initialized Gemini client for models: {GEMINI_MODEL_CLASSIFY}, {GEMINI_MODEL_PICKS}")
+        import google.generativeai as genai
+        genai.configure(api_key=GOOGLE_API_KEY)
+        gemini_model = genai.GenerativeModel(GEMINI_MODEL_CLASSIFY)
+        logger.info(f"Initialized Gemini: {GEMINI_MODEL_CLASSIFY}")
     except Exception as e:
         logger.error(f"Failed to initialize Gemini: {e}")
 
@@ -44,50 +46,6 @@ if LLM_PROVIDER == "claude" and CLAUDE_API_KEY:
         logger.error(f"Failed to initialize Claude: {e}")
 
 # Prompt templates
-CLASSIFY_PROMPT = """
-Sei un assistente per una persona con ADHD che cattura pensieri velocemente.
-
-USER BACKGROUND:
-{user_background}
-
-RECENT CONTEXT (ultimi 5 pensieri):
-{recent_items}
-
-INPUT UTENTE:
-"{verbatim_input}"
-
-TASK:
-1. Classifica il tipo di pensiero
-2. Estrai/inferisci il titolo corretto (es: se l'utente scrive "blade runner" -> "Blade Runner 2049" o "Blade Runner")
-3. Suggerisci link utili (IMDb per film, Goodreads/Amazon per libri, Wikipedia per concetti, Spotify per musica)
-4. Stima tempo necessario per consumare
-5. Assegna priorità basata su interesse/urgenza
-
-OUTPUT (JSON puro, senza markdown):
-{{
-  "type": "film|book|concept|music|art|todo|other",
-  "title": "titolo estratto/inferito",
-  "description": "cosa significa questo pensiero (1-2 frasi)",
-  "links": [
-    {{"url": "...", "type": "imdb|spotify|wikipedia|article|..."}}
-  ],
-  "estimated_minutes": 30,
-  "priority": 3,
-  "tags": ["tag1", "tag2"],
-  "consumption_suggestion": "come/quando consumarlo"
-}}
-
-REGOLE:
-- Sii generoso nell'interpretazione (preferisci classificare che "other")
-- Se ambiguo, usa il background utente per disambiguare
-- Trova almeno 1-2 link utili (IMDb, Spotify, Wikipedia, articoli, etc)
-- Stima tempo realisticamente (film=120min, concept=15-30min, libro=varie ore)
-- Priorità basata su: urgenza inferita, complessità, interesse utente
-- Tag: max 3-4, semantici (es: "sci-fi", "philosophy", "ambient-music")
-- RISPONDI SOLO CON IL JSON, niente altro testo prima o dopo
-"""
-
-# Gemini-specific prompt with search instruction
 CLASSIFY_PROMPT_GEMINI = """
 Sei un assistente per una persona con ADHD che cattura pensieri velocemente.
 
@@ -102,39 +60,71 @@ INPUT UTENTE:
 
 TASK:
 1. CERCA SU WEB per identificare esattamente cosa sia l'input
-2. Classifica il tipo di pensiero
-3. Estrai/inferisci il titolo corretto (es: se l'utente scrive "blade runner" -> "Blade Runner 2049" o "Blade Runner")
-4. Fornisci link utili REALI trovati nella ricerca (IMDb, Goodreads, Wikipedia, Spotify, etc)
-5. Stima tempo necessario per consumare
-6. Assegna priorità basata su interesse/urgenza
+2. Classifica il tipo di pensiero basandoti sui risultati della ricerca
+3. Estrai titolo corretto e informazioni reali trovate online
+4. Fornisci link REALI da fonti autorevoli (IMDb, Spotify, Wikipedia, Bandcamp, etc)
+5. Stima tempo e priorità
 
-OUTPUT (JSON puro, senza markdown):
+OUTPUT (SOLO JSON, NO markdown, NO testo aggiuntivo):
 {{
   "type": "film|book|concept|music|art|todo|other",
-  "title": "titolo estratto/inferito",
-  "description": "cosa significa questo pensiero (1-2 frasi)",
+  "title": "titolo esatto trovato nella ricerca",
+  "description": "cosa significa (1-2 frasi basate su ricerca)",
   "links": [
-    {{"url": "...", "type": "imdb|spotify|wikipedia|article|..."}}
+    {{"url": "link reale trovato", "type": "imdb|spotify|wikipedia|bandcamp|..."}}
   ],
   "estimated_minutes": 30,
   "priority": 3,
+  "tags": ["tag1", "tag2", "tag3"],
+  "consumption_suggestion": "quando/come consumarlo"
+}}
+
+REGOLE CRITICHE:
+- USA web search per trovare informazioni accurate
+- Link SOLO da ricerca (no invenzioni)
+- Se ricerca non trova nulla → type: "other", description: "Richiede chiarimento"
+- Priorità: 5=urgente/evento, 4=interessante, 3=normale, 2=bassa, 1=archivio
+- RISPONDI SOLO CON JSON PURO
+"""
+
+CLASSIFY_PROMPT_CLAUDE = """
+Sei un assistente per una persona con ADHD che cattura pensieri velocemente.
+
+USER BACKGROUND:
+{user_background}
+
+RECENT CONTEXT (ultimi 5 pensieri):
+{recent_items}
+
+INPUT UTENTE:
+"{verbatim_input}"
+
+TASK:
+1. USA web_search tool per identificare cosa sia l'input
+2. Classifica basandoti sui risultati
+3. Estrai informazioni reali trovate
+4. Fornisci link autorevoli
+
+OUTPUT (SOLO JSON):
+{{
+  "type": "film|book|concept|music|art|todo|other",
+  "title": "titolo esatto",
+  "description": "cosa significa (1-2 frasi)",
+  "links": [{{"url": "...", "type": "..."}}],
+  "estimated_minutes": 30,
+  "priority": 3,
   "tags": ["tag1", "tag2"],
-  "consumption_suggestion": "come/quando consumarlo"
+  "consumption_suggestion": "quando/come"
 }}
 
 REGOLE:
-- CERCA SEMPRE prima di classificare
-- Sii generoso nell'interpretazione (preferisci classificare che "other")
-- Se ambiguo, usa il background utente per disambiguare
-- Link da fonti autorevoli trovate nella ricerca
-- Stima tempo realisticamente (film=120min, concept=15-30min, libro=varie ore)
-- Priorità basata su: urgenza inferita, complessità, interesse utente
-- Tag: max 3-4, semantici (es: "sci-fi", "philosophy", "ambient-music")
-- RISPONDI SOLO CON IL JSON, niente altro testo prima o dopo
+- Cerca SEMPRE prima di rispondere
+- Link solo da fonti reali
+- RISPONDI SOLO JSON
 """
 
 DAILY_PICKS_PROMPT = """
-Sei un assistente che aiuta una persona ADHD a consumare contenuti in modo sostenibile.
+Sei un assistente per persona ADHD.
 
 USER BACKGROUND:
 {user_background}
@@ -143,103 +133,98 @@ PENDING ITEMS:
 {pending_items}
 
 CONTEXT:
-- Oggi è: {day_of_week}
+- Oggi: {day_of_week}
 - Ora: {current_time}
-- Ultimi 7 giorni: consumati {recent_consumed}, catturati {recent_captured}
+- Ultimi 7gg: consumati {recent_consumed}, catturati {recent_captured}
 
 TASK:
-Seleziona 3-5 item dalla lista pending che siano:
-1. Appropriati per il giorno/ora (weekend=film lunghi, feriale=concept brevi)
-2. Bilanciati per tipo (non tutti film o tutti concept)
-3. Sostenibili come tempo totale (max 2-3 ore cumulative)
-4. Interessanti basandosi sul background utente
+Seleziona 3-5 item appropriati per oggi.
 
-OUTPUT (JSON puro, senza markdown):
+OUTPUT (SOLO JSON):
 {{
   "picks": [
-    {{
-      "item_id": 123,
-      "reason": "perché lo suggerisci oggi"
-    }}
+    {{"item_id": 123, "reason": "perché oggi"}}
   ],
   "total_estimated_time": 120,
-  "message": "messaggio motivazionale per l'utente (1 frase)"
+  "message": "messaggio motivazionale (1 frase)"
 }}
 
 REGOLE:
-- Priorità a item vecchi (>7gg) per evitare accumulo
-- Varia i tipi (non tutti dello stesso tipo)
-- Considera il mood del giorno (venerdì sera ≠ lunedì mattina)
-- Messaggio positivo, mai giudicante
-- RISPONDI SOLO CON IL JSON, niente altro testo prima o dopo
+- Bilanciati per tipo e tempo
+- Priorità a vecchi (>7gg)
+- Max 2-3 ore totali
+- SOLO JSON
 """
 
 
 def extract_json(text: str) -> Optional[Dict]:
-    """Extract JSON from text, handling markdown code blocks."""
-    # Try direct parse first
+    """Extract JSON from text, handling markdown and extra text."""
+    text = text.strip()
+    
+    # Remove markdown code blocks
+    text = re.sub(r'```json\s*', '', text)
+    text = re.sub(r'```\s*', '', text)
+    
+    # Try direct parse
     try:
-        return json.loads(text.strip())
+        return json.loads(text)
     except json.JSONDecodeError:
         pass
-
-    # Try extracting from markdown code block
-    json_match = re.search(r'```(?:json)?\n?(.*?)\n?```', text, re.DOTALL)
-    if json_match:
-        try:
-            return json.loads(json_match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-
-    # Try finding JSON object pattern
-    json_match = re.search(r'\{[\s\S]*\}', text)
+    
+    # Find JSON object in text
+    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
     if json_match:
         try:
             return json.loads(json_match.group(0))
         except json.JSONDecodeError:
             pass
-
+    
     return None
 
 
 async def classify_with_gemini(prompt: str) -> Optional[Dict]:
     """Classify using Gemini with Google Search grounding."""
-    if not gemini_client:
-        logger.error("Gemini client not initialized")
+    if not gemini_model:
+        logger.error("Gemini model not initialized")
         return None
 
     try:
-        from google.genai import types
-        import asyncio
-
-        # Create Google Search tool for grounding
-        search_tool = types.Tool(google_search=types.GoogleSearch())
-
-        # Configuration with tools and JSON response
-        config = types.GenerateContentConfig(
-            tools=[search_tool],
-            response_mime_type="application/json",
+        import google.generativeai as genai
+        
+        # Generation config
+        generation_config = genai.GenerationConfig(
+            temperature=0.7,
             max_output_tokens=2000,
-            temperature=0.7
+            response_mime_type="application/json"
         )
-
-        # Run sync client in async context
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: gemini_client.models.generate_content(
-                model=GEMINI_MODEL_CLASSIFY,
-                contents=prompt,
-                config=config
-            )
+        
+        # Enable Google Search grounding
+        # This is the CORRECT syntax for the stable library
+        tools = [{"google_search_retrieval": {}}]
+        
+        # Generate content
+        response = gemini_model.generate_content(
+            prompt,
+            generation_config=generation_config,
+            tools=tools
         )
-
-        if response.text:
-            return extract_json(response.text)
-        return None
-
+        
+        if not response or not response.text:
+            logger.error("Empty response from Gemini")
+            return None
+        
+        # Parse JSON from response
+        result = extract_json(response.text)
+        
+        if not result:
+            logger.warning(f"Failed to parse Gemini JSON: {response.text[:200]}")
+            return None
+        
+        logger.info(f"Successfully classified with Gemini: {result.get('title', 'unknown')}")
+        return result
+        
     except Exception as e:
-        logger.error(f"Gemini classification error: {e}")
+        logger.error(f"Gemini classification error: {e}", exc_info=True)
         return None
 
 
@@ -250,8 +235,6 @@ async def classify_with_claude(prompt: str) -> Optional[Dict]:
         return None
 
     try:
-        import anthropic
-
         response = claude_client.messages.create(
             model=CLAUDE_MODEL_CLASSIFY,
             max_tokens=2000,
@@ -267,48 +250,46 @@ async def classify_with_claude(prompt: str) -> Optional[Dict]:
             if block.type == "text":
                 result = extract_json(block.text)
                 if result:
+                    logger.info(f"Successfully classified with Claude: {result.get('title', 'unknown')}")
                     return result
+        
+        logger.warning("No valid JSON in Claude response")
         return None
 
     except Exception as e:
-        logger.error(f"Claude classification error: {e}")
+        logger.error(f"Claude classification error: {e}", exc_info=True)
         return None
 
 
 async def generate_picks_with_gemini(prompt: str) -> Optional[Dict]:
-    """Generate daily picks using Gemini."""
-    if not gemini_client:
-        logger.error("Gemini client not initialized")
+    """Generate daily picks using Gemini (no search needed)."""
+    if not gemini_model:
+        logger.error("Gemini model not initialized")
         return None
 
     try:
-        from google.genai import types
-        import asyncio
-
-        # Configuration for JSON response (no search tool needed for picks)
-        config = types.GenerateContentConfig(
-            response_mime_type="application/json",
+        import google.generativeai as genai
+        
+        # Use picks model
+        picks_model = genai.GenerativeModel(GEMINI_MODEL_PICKS)
+        
+        generation_config = genai.GenerationConfig(
+            temperature=0.7,
             max_output_tokens=1500,
-            temperature=0.7
+            response_mime_type="application/json"
         )
-
-        # Run sync client in async context
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: gemini_client.models.generate_content(
-                model=GEMINI_MODEL_PICKS,
-                contents=prompt,
-                config=config
-            )
+        
+        response = picks_model.generate_content(
+            prompt,
+            generation_config=generation_config
         )
-
-        if response.text:
+        
+        if response and response.text:
             return extract_json(response.text)
         return None
 
     except Exception as e:
-        logger.error(f"Gemini picks error: {e}")
+        logger.error(f"Gemini picks error: {e}", exc_info=True)
         return None
 
 
@@ -335,7 +316,7 @@ async def generate_picks_with_claude(prompt: str) -> Optional[Dict]:
         return None
 
     except Exception as e:
-        logger.error(f"Claude picks error: {e}")
+        logger.error(f"Claude picks error: {e}", exc_info=True)
         return None
 
 
@@ -343,8 +324,10 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
     """
     Classifica e arricchisce un pensiero usando l'LLM configurato.
     """
+    logger.info(f"Classifying: {verbatim[:50]}... with {LLM_PROVIDER}")
+    
     # Check if any provider is available
-    if LLM_PROVIDER == "gemini" and not gemini_client:
+    if LLM_PROVIDER == "gemini" and not gemini_model:
         logger.error("Gemini not initialized - missing GOOGLE_API_KEY")
         return await create_fallback_result(verbatim, msg_id)
     elif LLM_PROVIDER == "claude" and not claude_client:
@@ -356,16 +339,12 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
         user_background = await get_config('user_background', '')
         recent_items = await get_recent_items(limit=5)
 
-        # Get custom prompt if configured, otherwise use default
-        custom_prompt = await get_config('classify_prompt', '')
-
-        # Use Gemini-specific prompt if using Gemini (includes search instruction)
-        if LLM_PROVIDER == "gemini":
-            prompt_template = custom_prompt if custom_prompt else CLASSIFY_PROMPT_GEMINI
-        else:
-            prompt_template = custom_prompt if custom_prompt else CLASSIFY_PROMPT
-
         # Format prompt
+        if LLM_PROVIDER == "gemini":
+            prompt_template = CLASSIFY_PROMPT_GEMINI
+        else:
+            prompt_template = CLASSIFY_PROMPT_CLAUDE
+
         prompt = prompt_template.format(
             user_background=user_background or "Nessun background impostato",
             recent_items=json.dumps(recent_items, indent=2, ensure_ascii=False) if recent_items else "Nessun item recente",
@@ -379,7 +358,7 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
             result = await classify_with_claude(prompt)
 
         if not result:
-            logger.warning(f"Failed to parse LLM response for: {verbatim[:50]}")
+            logger.warning(f"Failed to get valid result for: {verbatim[:50]}")
             return await create_fallback_result(verbatim, msg_id)
 
         # Validate and normalize result
@@ -402,10 +381,11 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
         )
 
         result['id'] = item_id
+        logger.info(f"Successfully saved item {item_id}: {result['title']}")
         return result
 
     except Exception as e:
-        logger.error(f"Error classifying thought: {e}")
+        logger.error(f"Error classifying thought: {e}", exc_info=True)
         return await create_fallback_result(verbatim, msg_id)
 
 
@@ -417,16 +397,18 @@ def normalize_classification(result: Dict) -> Dict:
         'type': result.get('type', 'other') if result.get('type') in valid_types else 'other',
         'title': result.get('title', '')[:200],
         'description': result.get('description', ''),
-        'links': result.get('links', [])[:10],  # Limit links
-        'estimated_minutes': min(max(result.get('estimated_minutes', 15), 1), 600),  # 1-600 min
-        'priority': min(max(result.get('priority', 3), 1), 5),  # 1-5
-        'tags': result.get('tags', [])[:5],  # Limit tags
+        'links': result.get('links', [])[:10],
+        'estimated_minutes': min(max(result.get('estimated_minutes', 15), 1), 600),
+        'priority': min(max(result.get('priority', 3), 1), 5),
+        'tags': result.get('tags', [])[:5],
         'consumption_suggestion': result.get('consumption_suggestion', '')
     }
 
 
 async def create_fallback_result(verbatim: str, msg_id: Optional[int] = None) -> Dict[str, Any]:
     """Create fallback result when classification fails."""
+    logger.warning(f"Creating fallback for: {verbatim[:50]}")
+    
     result = {
         'type': 'other',
         'title': verbatim[:50] + ('...' if len(verbatim) > 50 else ''),
@@ -459,19 +441,17 @@ async def create_fallback_result(verbatim: str, msg_id: Optional[int] = None) ->
 
 
 async def generate_daily_picks() -> Optional[Dict[str, Any]]:
-    """
-    Genera suggerimenti giornalieri.
-    """
-    # Check if any provider is available
-    if LLM_PROVIDER == "gemini" and not gemini_client:
-        logger.error("Gemini not initialized - missing GOOGLE_API_KEY")
+    """Genera suggerimenti giornalieri."""
+    logger.info(f"Generating daily picks with {LLM_PROVIDER}")
+    
+    if LLM_PROVIDER == "gemini" and not gemini_model:
+        logger.error("Gemini not initialized")
         return None
     elif LLM_PROVIDER == "claude" and not claude_client:
-        logger.error("Claude not initialized - missing CLAUDE_API_KEY")
+        logger.error("Claude not initialized")
         return None
 
     try:
-        # Get context
         user_background = await get_config('user_background', '')
         pending_items = await get_pending_items_for_picks(limit=50)
 
@@ -481,7 +461,6 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
 
         recent_stats = await get_stats_last_7_days()
 
-        # Format prompt
         prompt = DAILY_PICKS_PROMPT.format(
             user_background=user_background or "Nessun background impostato",
             pending_items=json.dumps(pending_items, indent=2, ensure_ascii=False),
@@ -491,7 +470,6 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
             recent_captured=recent_stats['captured']
         )
 
-        # Call appropriate LLM
         if LLM_PROVIDER == "gemini":
             result = await generate_picks_with_gemini(prompt)
         else:
@@ -501,7 +479,7 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
             logger.warning("Failed to parse daily picks response")
             return None
 
-        # Validate picks exist in database
+        # Validate picks
         valid_picks = []
         total_time = 0
 
@@ -519,7 +497,6 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
             logger.warning("No valid picks generated")
             return None
 
-        # Save picks
         today = datetime.now().strftime('%Y-%m-%d')
         await save_daily_picks(
             date=today,
@@ -528,6 +505,7 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
             message=result.get('message', '')
         )
 
+        logger.info(f"Generated {len(valid_picks)} picks for {today}")
         return {
             'date': today,
             'picks': valid_picks,
@@ -536,7 +514,7 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
         }
 
     except Exception as e:
-        logger.error(f"Error generating daily picks: {e}")
+        logger.error(f"Error generating daily picks: {e}", exc_info=True)
         return None
 
 
@@ -548,7 +526,6 @@ async def get_daily_picks_with_items(date: str) -> Optional[Dict[str, Any]]:
     if not picks_data:
         return None
 
-    # Enrich picks with item data
     enriched_picks = []
     for pick in picks_data.get('picks', []):
         item = await get_item_by_id(pick.get('item_id'))
@@ -564,130 +541,3 @@ async def get_daily_picks_with_items(date: str) -> Optional[Dict[str, Any]]:
         'total_estimated_time': picks_data.get('total_estimated_time', 0),
         'message': picks_data.get('message', '')
     }
-
-
-async def debug_classify(verbatim: str) -> Dict[str, Any]:
-    """
-    Debug version of classify that returns raw response and metadata.
-    Used for testing API calls in settings.
-    """
-    from config import LLM_PROVIDER, GEMINI_MODEL_CLASSIFY
-
-    result = {
-        "input": verbatim,
-        "raw_response": None,
-        "parsed_json": None,
-        "grounding_metadata": None,
-        "model": None,
-        "error": None
-    }
-
-    try:
-        # Get context
-        user_background = await get_config('user_background', '')
-        recent_items = await get_recent_items(limit=5)
-
-        # Build prompt
-        if LLM_PROVIDER == "gemini":
-            prompt_template = CLASSIFY_PROMPT_GEMINI
-        else:
-            prompt_template = CLASSIFY_PROMPT
-
-        prompt = prompt_template.format(
-            user_background=user_background or "Nessun background impostato",
-            recent_items=json.dumps(recent_items, indent=2, ensure_ascii=False) if recent_items else "Nessun item recente",
-            verbatim_input=verbatim
-        )
-
-        result["prompt_preview"] = prompt[:500] + "..." if len(prompt) > 500 else prompt
-
-        if LLM_PROVIDER == "gemini":
-            result["model"] = GEMINI_MODEL_CLASSIFY
-            debug_result = await debug_classify_gemini(prompt)
-            result.update(debug_result)
-        else:
-            result["model"] = "claude"
-            result["error"] = "Debug not implemented for Claude yet"
-
-    except Exception as e:
-        result["error"] = str(e)
-        result["error_type"] = type(e).__name__
-
-    return result
-
-
-async def debug_classify_gemini(prompt: str) -> Dict[str, Any]:
-    """Debug Gemini classification with full response details."""
-    if not gemini_client:
-        return {"error": "Gemini client not initialized"}
-
-    try:
-        from google.genai import types
-        import asyncio
-
-        # Create Google Search tool for grounding
-        search_tool = types.Tool(google_search=types.GoogleSearch())
-
-        # Configuration with tools and JSON response
-        config = types.GenerateContentConfig(
-            tools=[search_tool],
-            response_mime_type="application/json",
-            max_output_tokens=2000,
-            temperature=0.7
-        )
-
-        # Run sync client in async context
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: gemini_client.models.generate_content(
-                model=GEMINI_MODEL_CLASSIFY,
-                contents=prompt,
-                config=config
-            )
-        )
-
-        result = {
-            "raw_response": response.text if hasattr(response, 'text') else str(response),
-            "parsed_json": None,
-            "grounding_metadata": None,
-            "candidates_info": None
-        }
-
-        # Try to parse JSON
-        if response.text:
-            result["parsed_json"] = extract_json(response.text)
-
-        # Extract grounding metadata if available
-        if hasattr(response, 'candidates') and response.candidates:
-            candidate = response.candidates[0]
-            result["candidates_info"] = {
-                "finish_reason": str(candidate.finish_reason) if hasattr(candidate, 'finish_reason') else None,
-            }
-
-            if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
-                gm = candidate.grounding_metadata
-                result["grounding_metadata"] = {
-                    "search_queries": [q for q in gm.web_search_queries] if hasattr(gm, 'web_search_queries') else [],
-                    "grounding_chunks": len(gm.grounding_chunks) if hasattr(gm, 'grounding_chunks') else 0,
-                    "grounding_supports": len(gm.grounding_supports) if hasattr(gm, 'grounding_supports') else 0,
-                }
-
-                # Extract source URLs from grounding chunks
-                if hasattr(gm, 'grounding_chunks') and gm.grounding_chunks:
-                    sources = []
-                    for chunk in gm.grounding_chunks[:5]:  # Limit to 5
-                        if hasattr(chunk, 'web') and chunk.web:
-                            sources.append({
-                                "uri": chunk.web.uri if hasattr(chunk.web, 'uri') else None,
-                                "title": chunk.web.title if hasattr(chunk.web, 'title') else None
-                            })
-                    result["grounding_metadata"]["sources"] = sources
-
-        return result
-
-    except Exception as e:
-        return {
-            "error": str(e),
-            "error_type": type(e).__name__
-        }
