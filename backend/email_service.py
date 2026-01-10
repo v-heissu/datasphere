@@ -327,11 +327,28 @@ async def send_weekly_digest() -> bool:
         msg.attach(MIMEText(text_content, 'plain', 'utf-8'))
         msg.attach(MIMEText(html_content, 'html', 'utf-8'))
 
-        # Send email
-        with smtplib.SMTP(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT) as server:
-            server.starttls()
-            server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
-            server.send_message(msg)
+        # Send email - try SSL first (port 465), then TLS (port 587)
+        try:
+            if EMAIL_SMTP_PORT == 465:
+                # SSL connection
+                with smtplib.SMTP_SSL(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=30) as server:
+                    server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
+                    server.send_message(msg)
+            else:
+                # TLS connection (port 587)
+                with smtplib.SMTP(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=30) as server:
+                    server.starttls()
+                    server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
+                    server.send_message(msg)
+        except OSError as e:
+            # If network unreachable, try alternative port
+            logger.warning(f"Primary SMTP failed: {e}, trying alternative...")
+            if EMAIL_SMTP_PORT == 587:
+                with smtplib.SMTP_SSL(EMAIL_SMTP_HOST, 465, timeout=30) as server:
+                    server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
+                    server.send_message(msg)
+            else:
+                raise
 
         logger.info(f"Weekly digest sent successfully to {EMAIL_TO}")
         return True
