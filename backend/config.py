@@ -37,7 +37,7 @@ DASHBOARD_URL = os.getenv("DASHBOARD_URL", "http://localhost:8000")
 
 # API Settings
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
-API_PORT = int(os.getenv("API_PORT", "8000"))
+API_PORT = int(os.getenv("PORT", os.getenv("API_PORT", "8000")))  # Railway uses PORT
 
 # Email Settings (Gmail SMTP)
 EMAIL_ENABLED = os.getenv("EMAIL_ENABLED", "false").lower() == "true"
