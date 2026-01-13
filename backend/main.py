@@ -23,12 +23,15 @@ from database import (
     get_user_stats,
     get_config,
     save_config,
-    get_all_config
+    get_all_config,
+    search_items,
+    search_items_simple,
+    rebuild_fts_index
 )
 from llm_service import generate_daily_picks, get_daily_picks_with_items
 from telegram_bot import run_bot, create_bot_application
 from scheduler import init_scheduler, start_scheduler, stop_scheduler
-from models import ItemResponse, ItemUpdate, StatsResponse, EnrichmentData
+from models import ItemResponse, ItemUpdate, StatsResponse, EnrichmentData, SearchResponse, SearchResultItem
 
 # Configure logging
 logging.basicConfig(
@@ -48,6 +51,13 @@ async def lifespan(app: FastAPI):
     # Initialize database
     init_database()
     logger.info("Database initialized")
+
+    # Rebuild FTS index for existing items
+    try:
+        await rebuild_fts_index()
+        logger.info("FTS search index rebuilt")
+    except Exception as e:
+        logger.warning(f"Failed to rebuild FTS index: {e}")
 
     # Initialize and start scheduler
     init_scheduler()
@@ -134,6 +144,71 @@ async def get_items(
         ))
 
     return response
+
+
+@app.get("/api/search", response_model=SearchResponse)
+async def search(
+    q: str = Query(..., min_length=1, description="Search query"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    item_type: Optional[str] = Query(None, description="Filter by type"),
+    limit: int = Query(50, le=100, description="Max results to return")
+):
+    """
+    Full-text search across all item fields.
+    Searches in: title, description, verbatim_input, tags, notes, item_type.
+    """
+    try:
+        # Try FTS5 search first
+        items = await search_items(q, status, item_type, limit)
+    except Exception as e:
+        # Fallback to simple LIKE search if FTS fails
+        logger.warning(f"FTS search failed, using fallback: {e}")
+        items = await search_items_simple(q, status, item_type, limit)
+
+    # Convert to response model
+    results = []
+    for item in items:
+        enrichment = item.get('enrichment', {})
+        if not isinstance(enrichment, dict):
+            enrichment = {'links': [], 'consumption_suggestion': None}
+
+        results.append(SearchResultItem(
+            id=item['id'],
+            telegram_message_id=item.get('telegram_message_id'),
+            verbatim_input=item['verbatim_input'],
+            item_type=item.get('item_type'),
+            title=item.get('title'),
+            description=item.get('description'),
+            enrichment=EnrichmentData(**enrichment),
+            priority=item.get('priority', 3),
+            estimated_minutes=item.get('estimated_minutes'),
+            tags=item.get('tags', []),
+            status=item.get('status', 'pending'),
+            created_at=datetime.fromisoformat(item['created_at']) if item.get('created_at') else datetime.now(),
+            consumed_at=datetime.fromisoformat(item['consumed_at']) if item.get('consumed_at') else None,
+            archived_at=datetime.fromisoformat(item['archived_at']) if item.get('archived_at') else None,
+            snoozed_until=datetime.fromisoformat(item['snoozed_until']) if item.get('snoozed_until') else None,
+            consumption_feedback=item.get('consumption_feedback'),
+            notes=item.get('notes'),
+            search_rank=item.get('search_rank')
+        ))
+
+    return SearchResponse(
+        query=q,
+        total=len(results),
+        results=results
+    )
+
+
+@app.post("/api/search/rebuild-index")
+async def rebuild_search_index():
+    """Rebuild the full-text search index from existing items."""
+    try:
+        await rebuild_fts_index()
+        return {"success": True, "message": "FTS index rebuilt successfully"}
+    except Exception as e:
+        logger.error(f"Failed to rebuild FTS index: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to rebuild index: {str(e)}")
 
 
 @app.get("/api/items/{item_id}", response_model=ItemResponse)

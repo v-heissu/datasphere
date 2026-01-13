@@ -122,3 +122,35 @@ class DailyPicksResponse(BaseModel):
 class ConfigValue(BaseModel):
     key: str
     value: str
+
+
+class SearchResultItem(BaseModel):
+    """Single search result with relevance score."""
+    id: int
+    telegram_message_id: Optional[int]
+    verbatim_input: str
+    item_type: Optional[str]
+    title: Optional[str]
+    description: Optional[str]
+    enrichment: EnrichmentData
+    priority: int
+    estimated_minutes: Optional[int]
+    tags: List[str]
+    status: str
+    created_at: datetime
+    consumed_at: Optional[datetime]
+    archived_at: Optional[datetime]
+    snoozed_until: Optional[datetime]
+    consumption_feedback: Optional[str]
+    notes: Optional[str]
+    search_rank: Optional[float] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SearchResponse(BaseModel):
+    """Response for search endpoint."""
+    query: str
+    total: int
+    results: List[SearchResultItem]
