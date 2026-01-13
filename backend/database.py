@@ -78,6 +78,36 @@ CREATE TABLE IF NOT EXISTS stats (
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type);
 CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
+
+-- Full-text search virtual table (FTS5)
+CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
+    title,
+    description,
+    verbatim_input,
+    tags,
+    notes,
+    item_type,
+    content='items',
+    content_rowid='id'
+);
+
+-- Triggers to keep FTS index synchronized with items table
+CREATE TRIGGER IF NOT EXISTS items_ai AFTER INSERT ON items BEGIN
+    INSERT INTO items_fts(rowid, title, description, verbatim_input, tags, notes, item_type)
+    VALUES (new.id, new.title, new.description, new.verbatim_input, new.tags, new.notes, new.item_type);
+END;
+
+CREATE TRIGGER IF NOT EXISTS items_ad AFTER DELETE ON items BEGIN
+    INSERT INTO items_fts(items_fts, rowid, title, description, verbatim_input, tags, notes, item_type)
+    VALUES ('delete', old.id, old.title, old.description, old.verbatim_input, old.tags, old.notes, old.item_type);
+END;
+
+CREATE TRIGGER IF NOT EXISTS items_au AFTER UPDATE ON items BEGIN
+    INSERT INTO items_fts(items_fts, rowid, title, description, verbatim_input, tags, notes, item_type)
+    VALUES ('delete', old.id, old.title, old.description, old.verbatim_input, old.tags, old.notes, old.item_type);
+    INSERT INTO items_fts(rowid, title, description, verbatim_input, tags, notes, item_type)
+    VALUES (new.id, new.title, new.description, new.verbatim_input, new.tags, new.notes, new.item_type);
+END;
 """
 
 # Default config values
@@ -532,6 +562,118 @@ async def get_stats_last_7_days() -> Dict[str, int]:
             'captured': row['captured'] or 0,
             'consumed': row['consumed'] or 0
         }
+
+
+# Full-text search operations
+
+async def rebuild_fts_index():
+    """Rebuild the FTS index from existing items (for migration)."""
+    async with get_db() as db:
+        # Clear existing FTS content
+        await db.execute("DELETE FROM items_fts")
+
+        # Repopulate from items table
+        await db.execute("""
+            INSERT INTO items_fts(rowid, title, description, verbatim_input, tags, notes, item_type)
+            SELECT id, title, description, verbatim_input, tags, notes, item_type FROM items
+        """)
+        await db.commit()
+
+
+async def search_items(
+    query: str,
+    status: Optional[str] = None,
+    item_type: Optional[str] = None,
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+    """
+    Full-text search across all item fields.
+
+    Args:
+        query: Search query string (supports FTS5 syntax)
+        status: Optional filter by status
+        item_type: Optional filter by item type
+        limit: Maximum results to return
+
+    Returns:
+        List of matching items with search rank
+    """
+    async with get_db() as db:
+        # Build the query with optional filters
+        # Use FTS5 match with bm25 ranking
+        sql = """
+            SELECT items.*, bm25(items_fts) as search_rank
+            FROM items
+            INNER JOIN items_fts ON items.id = items_fts.rowid
+            WHERE items_fts MATCH ?
+        """
+        params = [query]
+
+        if status:
+            sql += " AND items.status = ?"
+            params.append(status)
+
+        if item_type:
+            sql += " AND items.item_type = ?"
+            params.append(item_type)
+
+        sql += " ORDER BY search_rank LIMIT ?"
+        params.append(limit)
+
+        cursor = await db.execute(sql, params)
+        rows = await cursor.fetchall()
+
+        results = []
+        for row in rows:
+            item = row_to_dict(row)
+            # Add search rank (lower is better in bm25)
+            item['search_rank'] = row['search_rank']
+            results.append(item)
+
+        return results
+
+
+async def search_items_simple(
+    query: str,
+    status: Optional[str] = None,
+    item_type: Optional[str] = None,
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+    """
+    Simple LIKE-based search fallback if FTS fails.
+    Searches across title, description, verbatim_input, tags, and notes.
+    """
+    async with get_db() as db:
+        search_pattern = f"%{query}%"
+
+        sql = """
+            SELECT * FROM items
+            WHERE (
+                title LIKE ? OR
+                description LIKE ? OR
+                verbatim_input LIKE ? OR
+                tags LIKE ? OR
+                notes LIKE ? OR
+                item_type LIKE ?
+            )
+        """
+        params = [search_pattern] * 6
+
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+
+        if item_type:
+            sql += " AND item_type = ?"
+            params.append(item_type)
+
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        cursor = await db.execute(sql, params)
+        rows = await cursor.fetchall()
+
+        return [row_to_dict(row) for row in rows]
 
 
 # Initialize database on module import
