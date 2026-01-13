@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any, List
 
 from config import (
     LLM_PROVIDER,
-    GOOGLE_API_KEY, GEMINI_MODEL_CLASSIFY, GEMINI_MODEL_PICKS,
+    GOOGLE_API_KEY, GEMINI_MODEL_CLASSIFY, GEMINI_MODEL_IMAGE, GEMINI_MODEL_PICKS,
     CLAUDE_API_KEY, CLAUDE_MODEL_CLASSIFY, CLAUDE_MODEL_PICKS,
     DASHBOARD_URL
 )
@@ -282,8 +282,9 @@ async def classify_image_with_gemini(image_bytes: bytes, mime_type: str, prompt:
         )
 
         # Generate content with Google Search grounding
+        # Use dedicated image model for higher quota limits
         response = gemini_client.models.generate_content(
-            model=GEMINI_MODEL_CLASSIFY,
+            model=GEMINI_MODEL_IMAGE,
             contents=contents,
             config=GenerateContentConfig(
                 temperature=0.7,
