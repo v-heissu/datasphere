@@ -7,8 +7,9 @@
 	import ItemAccordion from '$lib/components/ItemAccordion.svelte';
 	import DailyPicks from '$lib/components/DailyPicks.svelte';
 	import SettingsModal from '$lib/components/SettingsModal.svelte';
-	import { getItems, getStats, getDailyPicks, updateItem, deleteItem, regeneratePicks } from '$lib/api';
-	import { items, stats, statusFilter, typeFilter, dailyPicks, loading, error } from '$lib/stores';
+	import SearchBar from '$lib/components/SearchBar.svelte';
+	import { getItems, getStats, getDailyPicks, updateItem, deleteItem, regeneratePicks, searchItems } from '$lib/api';
+	import { items, stats, statusFilter, typeFilter, dailyPicks, loading, error, searchQuery, searchResults, searchLoading, isSearchMode } from '$lib/stores';
 
 	const itemTypes = ['film', 'book', 'concept', 'music', 'art', 'todo', 'other'];
 	const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
@@ -194,6 +195,26 @@
 		$typeFilter = $typeFilter === type ? null : type;
 		loadItems();
 	}
+
+	async function handleSearch(event) {
+		const { query } = event.detail;
+		$searchLoading = true;
+		try {
+			const response = await searchItems(query);
+			$searchResults = response.results;
+		} catch (e) {
+			console.error('Error searching:', e);
+			showToast('Errore nella ricerca', 'error');
+		} finally {
+			$searchLoading = false;
+		}
+	}
+
+	function handleSearchClear() {
+		$searchResults = null;
+		$searchQuery = '';
+		$isSearchMode = false;
+	}
 </script>
 
 <svelte:head>
@@ -206,20 +227,26 @@
 <main class="min-h-screen pb-safe">
 	<div class="container mx-auto px-3 sm:px-4 py-4 sm:py-8 max-w-6xl">
 		<!-- Header -->
-		<header class="mb-6 sm:mb-10 flex items-center justify-between">
-			<div class="flex items-center gap-2 sm:gap-3">
+		<header class="mb-6 sm:mb-10 flex items-center justify-between gap-3">
+			<div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
 				<div class="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-gradient-to-br from-[var(--accent)] to-purple-600">
 					<Brain class="w-5 h-5 sm:w-7 sm:h-7 text-white" />
 				</div>
-				<div>
+				<div class="hidden sm:block">
 					<h1 class="text-xl sm:text-3xl font-bold bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
 						ThoughtCapture
 					</h1>
-					<p class="text-xs sm:text-sm opacity-50 hidden sm:block">Pensieri catturati, pronti da consumare</p>
+					<p class="text-xs sm:text-sm opacity-50">Pensieri catturati, pronti da consumare</p>
 				</div>
 			</div>
+
+			<!-- Search Bar -->
+			<div class="flex-1 sm:flex-initial flex justify-end sm:justify-center">
+				<SearchBar on:search={handleSearch} on:clear={handleSearchClear} />
+			</div>
+
 			<button
-				class="btn btn-ghost btn-icon"
+				class="btn btn-ghost btn-icon flex-shrink-0"
 				on:click={() => showSettings = true}
 				title="Impostazioni"
 			>
@@ -227,11 +254,13 @@
 			</button>
 		</header>
 
-		<!-- Stats -->
-		<StatsWidget stats={$stats} />
+		<!-- Stats (hide in search mode) -->
+		{#if !$isSearchMode}
+			<StatsWidget stats={$stats} />
+		{/if}
 
-		<!-- Daily Picks -->
-		{#if $statusFilter === 'pending'}
+		<!-- Daily Picks (hide in search mode) -->
+		{#if $statusFilter === 'pending' && !$isSearchMode}
 			<DailyPicks
 				picks={$dailyPicks}
 				loading={picksLoading}
@@ -240,8 +269,22 @@
 			/>
 		{/if}
 
-		<!-- Status Filters - Scrollable on mobile -->
-		<div class="flex items-center gap-2 mb-4 sm:mb-6 overflow-x-auto pb-2 -mx-3 px-3 sm:mx-0 sm:px-0 sm:overflow-visible sm:flex-wrap">
+		<!-- Search Results Header -->
+		{#if $isSearchMode}
+			<div class="mb-6 sm:mb-8">
+				<div class="flex items-center justify-between mb-4">
+					<h2 class="text-lg sm:text-xl font-semibold">
+						Risultati per "{$searchQuery}"
+						{#if $searchResults}
+							<span class="text-[var(--text-muted)] font-normal ml-2">({$searchResults.length})</span>
+						{/if}
+					</h2>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Status Filters - Scrollable on mobile (hide in search mode) -->
+		<div class="flex items-center gap-2 mb-4 sm:mb-6 overflow-x-auto pb-2 -mx-3 px-3 sm:mx-0 sm:px-0 sm:overflow-visible sm:flex-wrap {$isSearchMode ? 'hidden' : ''}">
 			<button
 				class="btn btn-sm sm:btn {$statusFilter === 'pending' ? 'btn-primary' : 'btn-secondary'} whitespace-nowrap flex-shrink-0"
 				on:click={() => handleStatusFilter('pending')}
@@ -307,8 +350,8 @@
 			</button>
 		</div>
 
-		<!-- Type filters - Scrollable on mobile -->
-		<div class="flex gap-2 mb-6 sm:mb-8 overflow-x-auto pb-2 -mx-3 px-3 sm:mx-0 sm:px-0 sm:overflow-visible sm:flex-wrap items-center">
+		<!-- Type filters - Scrollable on mobile (hide in search mode) -->
+		<div class="flex gap-2 mb-6 sm:mb-8 overflow-x-auto pb-2 -mx-3 px-3 sm:mx-0 sm:px-0 sm:overflow-visible sm:flex-wrap items-center {$isSearchMode ? 'hidden' : ''}">
 			<span class="text-xs sm:text-sm opacity-50 flex-shrink-0">Tipo:</span>
 			{#each itemTypes as type}
 				<button
@@ -330,53 +373,79 @@
 		</div>
 
 		<!-- Error message -->
-		{#if $error}
+		{#if $error && !$isSearchMode}
 			<div class="card border-[var(--danger)]/50 bg-[var(--danger)]/10 px-4 py-3 mb-6 text-[var(--danger)] text-sm">
 				{$error}
 			</div>
 		{/if}
 
-		<!-- Items grid -->
-		{#if $loading && $items.length === 0}
-			<div class="text-center py-12 sm:py-16">
-				<RefreshCw class="w-8 h-8 sm:w-10 sm:h-10 animate-spin mx-auto text-[var(--accent)] opacity-50" />
-				<p class="opacity-40 mt-4 text-sm sm:text-base">Caricamento...</p>
-			</div>
-		{:else if $items.length === 0}
-			<div class="text-center py-12 sm:py-16">
-				<div class="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[var(--bg-secondary)] flex items-center justify-center mx-auto mb-4">
-					{#if $statusFilter === 'pending'}
-						<Inbox class="w-8 h-8 sm:w-10 sm:h-10 opacity-20" />
-					{:else if $statusFilter === 'consumed'}
-						<CheckCircle2 class="w-8 h-8 sm:w-10 sm:h-10 opacity-20" />
-					{:else}
-						<Archive class="w-8 h-8 sm:w-10 sm:h-10 opacity-20" />
-					{/if}
+		<!-- Search Results -->
+		{#if $isSearchMode}
+			{#if $searchLoading}
+				<div class="text-center py-12 sm:py-16">
+					<RefreshCw class="w-8 h-8 sm:w-10 sm:h-10 animate-spin mx-auto text-[var(--accent)] opacity-50" />
+					<p class="opacity-40 mt-4 text-sm sm:text-base">Ricerca in corso...</p>
 				</div>
-				<p class="opacity-50 text-base sm:text-lg">
-					{#if $statusFilter === 'pending'}
-						Coda vuota!
-					{:else if $statusFilter === 'consumed'}
-						Nessun item consumato.
-					{:else}
-						Nessun item archiviato.
-					{/if}
-				</p>
-				{#if $statusFilter === 'pending'}
-					<p class="text-xs sm:text-sm opacity-30 mt-2">Manda qualche pensiero su Telegram</p>
-				{/if}
-			</div>
-		{:else}
-			{#if viewMode === 'cards'}
+			{:else if $searchResults && $searchResults.length === 0}
+				<div class="text-center py-12 sm:py-16">
+					<div class="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[var(--bg-secondary)] flex items-center justify-center mx-auto mb-4">
+						<svg class="w-8 h-8 sm:w-10 sm:h-10 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+						</svg>
+					</div>
+					<p class="opacity-50 text-base sm:text-lg">Nessun risultato trovato</p>
+					<p class="text-xs sm:text-sm opacity-30 mt-2">Prova con termini diversi</p>
+				</div>
+			{:else if $searchResults}
 				<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-					{#each $items as item (item.id)}
+					{#each $searchResults as item (item.id)}
 						<ItemCard {item} on:action={handleAction} />
 					{/each}
 				</div>
-			{:else if viewMode === 'table'}
-				<ItemTable items={$items} on:action={handleAction} />
-			{:else if viewMode === 'accordion'}
-				<ItemAccordion items={$items} on:action={handleAction} />
+			{/if}
+		{:else}
+			<!-- Normal Items grid -->
+			{#if $loading && $items.length === 0}
+				<div class="text-center py-12 sm:py-16">
+					<RefreshCw class="w-8 h-8 sm:w-10 sm:h-10 animate-spin mx-auto text-[var(--accent)] opacity-50" />
+					<p class="opacity-40 mt-4 text-sm sm:text-base">Caricamento...</p>
+				</div>
+			{:else if $items.length === 0}
+				<div class="text-center py-12 sm:py-16">
+					<div class="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[var(--bg-secondary)] flex items-center justify-center mx-auto mb-4">
+						{#if $statusFilter === 'pending'}
+							<Inbox class="w-8 h-8 sm:w-10 sm:h-10 opacity-20" />
+						{:else if $statusFilter === 'consumed'}
+							<CheckCircle2 class="w-8 h-8 sm:w-10 sm:h-10 opacity-20" />
+						{:else}
+							<Archive class="w-8 h-8 sm:w-10 sm:h-10 opacity-20" />
+						{/if}
+					</div>
+					<p class="opacity-50 text-base sm:text-lg">
+						{#if $statusFilter === 'pending'}
+							Coda vuota!
+						{:else if $statusFilter === 'consumed'}
+							Nessun item consumato.
+						{:else}
+							Nessun item archiviato.
+						{/if}
+					</p>
+					{#if $statusFilter === 'pending'}
+						<p class="text-xs sm:text-sm opacity-30 mt-2">Manda qualche pensiero su Telegram</p>
+					{/if}
+				</div>
+			{:else}
+				{#if viewMode === 'cards'}
+					<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+						{#each $items as item (item.id)}
+							<ItemCard {item} on:action={handleAction} />
+						{/each}
+					</div>
+				{:else if viewMode === 'table'}
+					<ItemTable items={$items} on:action={handleAction} />
+				{:else if viewMode === 'accordion'}
+					<ItemAccordion items={$items} on:action={handleAction} />
+				{/if}
 			{/if}
 		{/if}
 	</div>

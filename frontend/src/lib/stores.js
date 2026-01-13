@@ -23,6 +23,12 @@ export const error = writable(null);
 // Daily picks
 export const dailyPicks = writable(null);
 
+// Search
+export const searchQuery = writable('');
+export const searchResults = writable(null);
+export const searchLoading = writable(false);
+export const isSearchMode = writable(false);
+
 // Derived store for filtered items count by type
 export const itemCountByType = derived(items, ($items) => {
 	const counts = {};
