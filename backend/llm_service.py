@@ -270,13 +270,16 @@ async def classify_image_with_gemini(image_bytes: bytes, mime_type: str, prompt:
         return None
 
     try:
-        from google.genai.types import GenerateContentConfig, GoogleSearch, Tool, Part
+        from google.genai.types import GenerateContentConfig, GoogleSearch, Tool, Part, Content
 
-        # Create multimodal content with image and text prompt
-        contents = [
-            Part.from_bytes(data=image_bytes, mime_type=mime_type),
-            prompt
-        ]
+        # Create multimodal content with image and text prompt (must specify role)
+        contents = Content(
+            role="user",
+            parts=[
+                Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                Part.from_text(prompt)
+            ]
+        )
 
         # Generate content with Google Search grounding
         response = gemini_client.models.generate_content(
