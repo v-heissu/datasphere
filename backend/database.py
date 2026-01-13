@@ -675,6 +675,28 @@ async def rebuild_fts_index():
         await db.commit()
 
 
+def prepare_fts_query(query: str) -> str:
+    """
+    Prepare query for FTS5 with prefix matching.
+    Transforms 'hello world' into 'hello* world*' for partial matching.
+    """
+    # Split into words and add prefix wildcard to each
+    words = query.strip().split()
+    if not words:
+        return query
+
+    # Add * to each word for prefix matching
+    # Also wrap in quotes if needed for phrases
+    prepared_words = []
+    for word in words:
+        # Clean the word (remove special FTS chars that could break query)
+        clean_word = ''.join(c for c in word if c.isalnum() or c in '-_')
+        if clean_word:
+            prepared_words.append(f'{clean_word}*')
+
+    return ' '.join(prepared_words)
+
+
 async def search_items(
     query: str,
     status: Optional[str] = None,
@@ -682,10 +704,10 @@ async def search_items(
     limit: int = 50
 ) -> List[Dict[str, Any]]:
     """
-    Full-text search across all item fields.
+    Full-text search across all item fields with prefix matching.
 
     Args:
-        query: Search query string (supports FTS5 syntax)
+        query: Search query string (automatically enhanced with prefix matching)
         status: Optional filter by status
         item_type: Optional filter by item type
         limit: Maximum results to return
@@ -693,6 +715,9 @@ async def search_items(
     Returns:
         List of matching items with search rank
     """
+    # Prepare query with prefix matching
+    fts_query = prepare_fts_query(query)
+
     async with get_db() as db:
         # Build the query with optional filters
         # Use FTS5 match with bm25 ranking
@@ -702,7 +727,7 @@ async def search_items(
             INNER JOIN items_fts ON items.id = items_fts.rowid
             WHERE items_fts MATCH ?
         """
-        params = [query]
+        params = [fts_query]
 
         if status:
             sql += " AND items.status = ?"
@@ -726,6 +751,51 @@ async def search_items(
             results.append(item)
 
         return results
+
+
+async def search_suggestions(query: str, limit: int = 8) -> List[Dict[str, Any]]:
+    """
+    Get search suggestions for autocomplete.
+    Returns matching titles and snippets from descriptions.
+    """
+    if len(query.strip()) < 2:
+        return []
+
+    fts_query = prepare_fts_query(query)
+
+    async with get_db() as db:
+        # Get matching items with snippets
+        sql = """
+            SELECT
+                items.id,
+                items.title,
+                items.item_type,
+                items.description,
+                snippet(items_fts, 1, '<mark>', '</mark>', '...', 10) as snippet,
+                bm25(items_fts) as search_rank
+            FROM items
+            INNER JOIN items_fts ON items.id = items_fts.rowid
+            WHERE items_fts MATCH ?
+            ORDER BY search_rank
+            LIMIT ?
+        """
+
+        try:
+            cursor = await db.execute(sql, [fts_query, limit])
+            rows = await cursor.fetchall()
+
+            suggestions = []
+            for row in rows:
+                suggestions.append({
+                    'id': row['id'],
+                    'title': row['title'],
+                    'item_type': row['item_type'],
+                    'description': row['description'][:100] + '...' if row['description'] and len(row['description']) > 100 else row['description'],
+                    'snippet': row['snippet']
+                })
+            return suggestions
+        except Exception:
+            return []
 
 
 async def search_items_simple(

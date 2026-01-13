@@ -26,6 +26,7 @@ from database import (
     get_all_config,
     search_items,
     search_items_simple,
+    search_suggestions,
     rebuild_fts_index
 )
 from llm_service import generate_daily_picks, get_daily_picks_with_items
@@ -209,6 +210,23 @@ async def rebuild_search_index():
     except Exception as e:
         logger.error(f"Failed to rebuild FTS index: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to rebuild index: {str(e)}")
+
+
+@app.get("/api/search/suggest")
+async def get_search_suggestions(
+    q: str = Query(..., min_length=2, description="Search query for suggestions"),
+    limit: int = Query(8, le=20, description="Max suggestions to return")
+):
+    """
+    Get search suggestions for autocomplete.
+    Returns matching titles and description snippets.
+    """
+    try:
+        suggestions = await search_suggestions(q, limit)
+        return {"query": q, "suggestions": suggestions}
+    except Exception as e:
+        logger.warning(f"Suggestions failed: {e}")
+        return {"query": q, "suggestions": []}
 
 
 @app.get("/api/items/{item_id}", response_model=ItemResponse)
