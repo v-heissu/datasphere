@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from config import DATABASE_PATH
 
 
-# SQL Schema
+# SQL Schema (base tables only)
 SCHEMA = """
 -- Core items table
 CREATE TABLE IF NOT EXISTS items (
@@ -78,7 +78,10 @@ CREATE TABLE IF NOT EXISTS stats (
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type);
 CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
+"""
 
+# FTS5 Schema (separate for robustness)
+FTS_SCHEMA = """
 -- Full-text search virtual table (FTS5)
 CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
     title,
@@ -143,6 +146,58 @@ def init_database():
 
     conn.commit()
     conn.close()
+
+    # Initialize FTS separately (more robust)
+    init_fts()
+
+
+def init_fts():
+    """Initialize FTS5 full-text search (separate for robustness)."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        conn.executescript(FTS_SCHEMA)
+        conn.commit()
+        logger.info("FTS5 search initialized successfully")
+    except Exception as e:
+        logger.warning(f"FTS5 init failed (will use fallback search): {e}")
+    finally:
+        conn.close()
+
+
+def rebuild_fts_sync():
+    """Rebuild FTS index synchronously (for use after init or repair)."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        # Drop existing FTS table and triggers if corrupted
+        conn.execute("DROP TRIGGER IF EXISTS items_ai")
+        conn.execute("DROP TRIGGER IF EXISTS items_ad")
+        conn.execute("DROP TRIGGER IF EXISTS items_au")
+        conn.execute("DROP TABLE IF EXISTS items_fts")
+        conn.commit()
+
+        # Recreate FTS schema
+        conn.executescript(FTS_SCHEMA)
+        conn.commit()
+
+        # Populate FTS from existing items
+        conn.execute("""
+            INSERT INTO items_fts(rowid, title, description, verbatim_input, tags, notes, item_type)
+            SELECT id, title, description, verbatim_input, tags, notes, item_type FROM items
+        """)
+        conn.commit()
+        logger.info("FTS index rebuilt successfully")
+        return True
+    except Exception as e:
+        logger.error(f"FTS rebuild failed: {e}")
+        return False
+    finally:
+        conn.close()
 
 
 @asynccontextmanager
@@ -567,12 +622,52 @@ async def get_stats_last_7_days() -> Dict[str, int]:
 # Full-text search operations
 
 async def rebuild_fts_index():
-    """Rebuild the FTS index from existing items (for migration)."""
+    """Rebuild the FTS index from existing items (drop and recreate if corrupted)."""
     async with get_db() as db:
-        # Clear existing FTS content
-        await db.execute("DELETE FROM items_fts")
+        # Drop existing FTS table and triggers (handles corruption)
+        await db.execute("DROP TRIGGER IF EXISTS items_ai")
+        await db.execute("DROP TRIGGER IF EXISTS items_ad")
+        await db.execute("DROP TRIGGER IF EXISTS items_au")
+        await db.execute("DROP TABLE IF EXISTS items_fts")
+        await db.commit()
 
-        # Repopulate from items table
+        # Recreate FTS table
+        await db.execute("""
+            CREATE VIRTUAL TABLE items_fts USING fts5(
+                title,
+                description,
+                verbatim_input,
+                tags,
+                notes,
+                item_type,
+                content='items',
+                content_rowid='id'
+            )
+        """)
+
+        # Recreate triggers
+        await db.execute("""
+            CREATE TRIGGER items_ai AFTER INSERT ON items BEGIN
+                INSERT INTO items_fts(rowid, title, description, verbatim_input, tags, notes, item_type)
+                VALUES (new.id, new.title, new.description, new.verbatim_input, new.tags, new.notes, new.item_type);
+            END
+        """)
+        await db.execute("""
+            CREATE TRIGGER items_ad AFTER DELETE ON items BEGIN
+                INSERT INTO items_fts(items_fts, rowid, title, description, verbatim_input, tags, notes, item_type)
+                VALUES ('delete', old.id, old.title, old.description, old.verbatim_input, old.tags, old.notes, old.item_type);
+            END
+        """)
+        await db.execute("""
+            CREATE TRIGGER items_au AFTER UPDATE ON items BEGIN
+                INSERT INTO items_fts(items_fts, rowid, title, description, verbatim_input, tags, notes, item_type)
+                VALUES ('delete', old.id, old.title, old.description, old.verbatim_input, old.tags, old.notes, old.item_type);
+                INSERT INTO items_fts(rowid, title, description, verbatim_input, tags, notes, item_type)
+                VALUES (new.id, new.title, new.description, new.verbatim_input, new.tags, new.notes, new.item_type);
+            END
+        """)
+
+        # Populate FTS from existing items
         await db.execute("""
             INSERT INTO items_fts(rowid, title, description, verbatim_input, tags, notes, item_type)
             SELECT id, title, description, verbatim_input, tags, notes, item_type FROM items
