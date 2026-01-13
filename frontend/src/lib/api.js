@@ -73,3 +73,11 @@ export async function setConfig(key, value) {
 export async function getAllConfig() {
 	return fetchAPI('/config');
 }
+
+export async function searchItems(query, status = null, itemType = null, limit = 50) {
+	const params = new URLSearchParams({ q: query, limit: limit.toString() });
+	if (status) params.append('status', status);
+	if (itemType) params.append('item_type', itemType);
+
+	return fetchAPI(`/search?${params}`);
+}
