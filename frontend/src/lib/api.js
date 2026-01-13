@@ -81,3 +81,8 @@ export async function searchItems(query, status = null, itemType = null, limit =
 
 	return fetchAPI(`/search?${params}`);
 }
+
+export async function getSearchSuggestions(query, limit = 8) {
+	const params = new URLSearchParams({ q: query, limit: limit.toString() });
+	return fetchAPI(`/search/suggest?${params}`);
+}
