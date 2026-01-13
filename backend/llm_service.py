@@ -277,7 +277,7 @@ async def classify_image_with_gemini(image_bytes: bytes, mime_type: str, prompt:
             role="user",
             parts=[
                 Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                Part.from_text(prompt)
+                Part.from_text(text=prompt)
             ]
         )
 
