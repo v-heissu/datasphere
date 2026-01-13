@@ -122,6 +122,48 @@ REGOLE:
 - RISPONDI SOLO JSON
 """
 
+CLASSIFY_IMAGE_PROMPT = """
+Sei un assistente per una persona con ADHD che cattura pensieri velocemente.
+
+USER BACKGROUND:
+{user_background}
+
+RECENT CONTEXT (ultimi 5 pensieri):
+{recent_items}
+
+L'utente ti ha inviato un'IMMAGINE (es. screenshot, foto, copertina).
+{caption_context}
+
+TASK:
+1. ANALIZZA l'immagine per capire cosa rappresenta
+2. Se contiene testo (screenshot, articolo, post), estrai il contenuto principale
+3. Se è un'immagine di un prodotto/media (copertina libro, poster film, album), identificalo
+4. CERCA SU WEB per trovare informazioni aggiuntive se necessario
+5. Classifica e arricchisci come faresti con un pensiero testuale
+
+OUTPUT (SOLO JSON, NO markdown, NO testo aggiuntivo):
+{{
+  "type": "film|book|concept|music|art|todo|other",
+  "title": "titolo identificato o descrizione breve",
+  "description": "cosa rappresenta l'immagine e info trovate (2-3 frasi)",
+  "links": [
+    {{"url": "link reale trovato", "type": "imdb|spotify|wikipedia|bandcamp|..."}}
+  ],
+  "estimated_minutes": 30,
+  "priority": 3,
+  "tags": ["tag1", "tag2", "tag3"],
+  "consumption_suggestion": "quando/come consumarlo",
+  "image_analysis": "breve descrizione di cosa mostra l'immagine"
+}}
+
+REGOLE CRITICHE:
+- Se è uno screenshot con testo, estrai il contenuto rilevante
+- Se è una copertina/poster, identifica il media
+- USA web search per arricchire con info reali
+- Se non riesci a identificare → type: "other", description: "Immagine non identificata"
+- RISPONDI SOLO CON JSON PURO
+"""
+
 DAILY_PICKS_PROMPT = """
 Sei un assistente per persona ADHD.
 
@@ -218,6 +260,51 @@ async def classify_with_gemini(prompt: str) -> Optional[Dict]:
 
     except Exception as e:
         logger.error(f"Gemini classification error: {e}", exc_info=True)
+        return None
+
+
+async def classify_image_with_gemini(image_bytes: bytes, mime_type: str, prompt: str) -> Optional[Dict]:
+    """Classify an image using Gemini's multimodal capabilities with Google Search grounding."""
+    if not gemini_client:
+        logger.error("Gemini client not initialized")
+        return None
+
+    try:
+        from google.genai.types import GenerateContentConfig, GoogleSearch, Tool, Part
+
+        # Create multimodal content with image and text prompt
+        contents = [
+            Part.from_bytes(data=image_bytes, mime_type=mime_type),
+            prompt
+        ]
+
+        # Generate content with Google Search grounding
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL_CLASSIFY,
+            contents=contents,
+            config=GenerateContentConfig(
+                temperature=0.7,
+                max_output_tokens=2000,
+                tools=[Tool(google_search=GoogleSearch())]
+            )
+        )
+
+        if not response or not response.text:
+            logger.error("Empty response from Gemini for image")
+            return None
+
+        # Parse JSON from response
+        result = extract_json(response.text)
+
+        if not result:
+            logger.warning(f"Failed to parse Gemini image JSON: {response.text[:200]}")
+            return None
+
+        logger.info(f"Successfully classified image with Gemini: {result.get('title', 'unknown')}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Gemini image classification error: {e}", exc_info=True)
         return None
 
 
@@ -377,6 +464,116 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
     except Exception as e:
         logger.error(f"Error classifying thought: {e}", exc_info=True)
         return await create_fallback_result(verbatim, msg_id)
+
+
+async def classify_and_enrich_image(
+    image_bytes: bytes,
+    mime_type: str,
+    caption: Optional[str] = None,
+    msg_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Classifica e arricchisce un'immagine usando Gemini multimodale.
+    """
+    logger.info(f"Classifying image ({mime_type}, {len(image_bytes)} bytes) with Gemini")
+
+    if not gemini_client:
+        logger.error("Gemini not initialized - image classification requires Gemini")
+        return await create_image_fallback_result(caption, msg_id)
+
+    try:
+        # Get context
+        user_background = await get_config('user_background', '')
+        recent_items = await get_recent_items(limit=5)
+
+        # Format caption context
+        if caption:
+            caption_context = f"L'utente ha aggiunto questa descrizione: \"{caption}\""
+        else:
+            caption_context = "L'utente non ha aggiunto una descrizione."
+
+        # Format prompt
+        prompt = CLASSIFY_IMAGE_PROMPT.format(
+            user_background=user_background or "Nessun background impostato",
+            recent_items=json.dumps(recent_items, indent=2, ensure_ascii=False) if recent_items else "Nessun item recente",
+            caption_context=caption_context
+        )
+
+        # Call Gemini with image
+        result = await classify_image_with_gemini(image_bytes, mime_type, prompt)
+
+        if not result:
+            logger.warning("Failed to get valid result for image")
+            return await create_image_fallback_result(caption, msg_id)
+
+        # Validate and normalize result
+        result = normalize_classification(result)
+
+        # Build verbatim from caption or image analysis
+        verbatim = caption if caption else f"[Immagine: {result.get('image_analysis', 'analisi non disponibile')}]"
+
+        # Save to database
+        item_id = await save_item(
+            telegram_message_id=msg_id,
+            verbatim_input=verbatim,
+            item_type=result['type'],
+            title=result['title'],
+            description=result['description'],
+            enrichment={
+                'links': result['links'],
+                'consumption_suggestion': result['consumption_suggestion'],
+                'image_analysis': result.get('image_analysis', '')
+            },
+            priority=result['priority'],
+            estimated_minutes=result['estimated_minutes'],
+            tags=result['tags']
+        )
+
+        result['id'] = item_id
+        logger.info(f"Successfully saved image item {item_id}: {result['title']}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error classifying image: {e}", exc_info=True)
+        return await create_image_fallback_result(caption, msg_id)
+
+
+async def create_image_fallback_result(caption: Optional[str], msg_id: Optional[int] = None) -> Dict[str, Any]:
+    """Create fallback result when image classification fails."""
+    logger.warning("Creating fallback for image")
+
+    verbatim = caption if caption else "[Immagine non classificata]"
+    title = caption[:50] if caption else "Immagine non identificata"
+
+    result = {
+        'type': 'other',
+        'title': title + ('...' if caption and len(caption) > 50 else ''),
+        'description': 'Classificazione immagine fallita, richiede review manuale',
+        'links': [],
+        'estimated_minutes': 15,
+        'priority': 3,
+        'tags': ['image', 'uncategorized'],
+        'consumption_suggestion': ''
+    }
+
+    # Still save to database
+    item_id = await save_item(
+        telegram_message_id=msg_id,
+        verbatim_input=verbatim,
+        item_type=result['type'],
+        title=result['title'],
+        description=result['description'],
+        enrichment={
+            'links': [],
+            'consumption_suggestion': ''
+        },
+        priority=result['priority'],
+        estimated_minutes=result['estimated_minutes'],
+        tags=result['tags']
+    )
+
+    result['id'] = item_id
+    return result
 
 
 def normalize_classification(result: Dict) -> Dict:

@@ -17,7 +17,7 @@ from telegram.ext import (
 
 from config import TELEGRAM_BOT_TOKEN, DASHBOARD_URL
 from database import get_config, save_config, get_user_stats, get_daily_picks_for_date
-from llm_service import classify_and_enrich, generate_daily_picks, get_daily_picks_with_items
+from llm_service import classify_and_enrich, classify_and_enrich_image, generate_daily_picks, get_daily_picks_with_items
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -54,9 +54,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Come funziona:\n\n"
         "1. Mandami un pensiero qualsiasi\n"
-        "2. Lo salvo e lo classifico automaticamente\n"
-        "3. Trovo link utili per approfondire\n"
-        "4. Te lo ripropongo quando opportuno\n\n"
+        "2. Oppure mandami una foto/screenshot\n"
+        "3. Lo salvo e lo classifico automaticamente\n"
+        "4. Trovo link utili per approfondire\n"
+        "5. Te lo ripropongo quando opportuno\n\n"
         "Comandi disponibili:\n"
         "/start - Inizia\n"
         "/background - Imposta interessi e preferenze\n"
@@ -200,6 +201,63 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # The fallback in classify_and_enrich should handle this
 
 
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler per foto/immagini."""
+
+    # Get the largest photo (best quality)
+    photo = update.message.photo[-1]  # Last element is highest resolution
+    msg_id = update.message.message_id
+    caption = update.message.caption  # Optional caption
+
+    # Conferma immediata
+    await update.message.reply_text("Immagine ricevuta, analizzo...")
+
+    try:
+        # Download photo from Telegram
+        photo_file = await photo.get_file()
+        image_bytes = await photo_file.download_as_bytearray()
+
+        # Determine mime type (Telegram photos are always JPEG)
+        mime_type = "image/jpeg"
+
+        # Process with Gemini
+        result = await classify_and_enrich_image(
+            image_bytes=bytes(image_bytes),
+            mime_type=mime_type,
+            caption=caption,
+            msg_id=msg_id
+        )
+
+        # Send enriched confirmation
+        type_emoji = {
+            'film': 'Film',
+            'book': 'Libro',
+            'concept': 'Concetto',
+            'music': 'Musica',
+            'art': 'Arte',
+            'todo': 'Todo',
+            'other': 'Altro'
+        }
+
+        response = f"{type_emoji.get(result['type'], 'Altro')}: {result['title']}\n"
+        response += f"{result['estimated_minutes']}min | Priorita {result['priority']}"
+
+        if result.get('description'):
+            response += f"\n\n{result['description'][:200]}"
+
+        if result.get('links') and len(result['links']) > 0:
+            response += f"\n\nLink: {result['links'][0].get('url', '')[:50]}..."
+
+        await update.message.reply_text(response)
+
+    except Exception as e:
+        logger.error(f"Error processing photo: {e}")
+        await update.message.reply_text(
+            "Non sono riuscito ad analizzare l'immagine. "
+            "Prova con un'altra foto o aggiungi una descrizione testuale."
+        )
+
+
 async def send_telegram_message(chat_id: str, message: str):
     """Send a message to a specific chat (for scheduler)."""
     global bot_instance
@@ -231,6 +289,7 @@ def create_bot_application() -> Optional[Application]:
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("today", today_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     # Store bot instance for scheduler
     global bot_instance
