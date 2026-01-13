@@ -1,6 +1,6 @@
 <script>
 	import { createEventDispatcher, onMount } from 'svelte';
-	import { X, Save, RotateCcw, Settings, User, Bot, Mail, Send, CheckCircle2, AlertCircle, Bug, Play } from 'lucide-svelte';
+	import { X, Save, RotateCcw, Settings, User, Bot, Mail, Send, CheckCircle2, AlertCircle, Bug, Play, Search, Database } from 'lucide-svelte';
 
 	export let show = false;
 
@@ -18,6 +18,10 @@
 	let testInput = '';
 	let testResult = null;
 	let testing = false;
+
+	// Search index rebuild state
+	let rebuildingIndex = false;
+	let rebuildResult = null;
 
 	const defaultClassifyPrompt = `Sei un assistente per una persona con ADHD che cattura pensieri velocemente.
 
@@ -148,6 +152,24 @@ REGOLE:
 			testResult = { success: false, error: 'Errore di connessione: ' + e.message };
 		} finally {
 			testing = false;
+		}
+	}
+
+	async function rebuildSearchIndex() {
+		rebuildingIndex = true;
+		rebuildResult = null;
+		try {
+			const res = await fetch('/api/search/rebuild-index', { method: 'POST' });
+			const data = await res.json();
+			if (res.ok) {
+				rebuildResult = { success: true, message: data.message || 'Indice ricostruito con successo!' };
+			} else {
+				rebuildResult = { success: false, message: data.detail || 'Errore ricostruzione indice' };
+			}
+		} catch (e) {
+			rebuildResult = { success: false, message: 'Errore di connessione: ' + e.message };
+		} finally {
+			rebuildingIndex = false;
 		}
 	}
 
@@ -329,7 +351,49 @@ REGOLE:
 						</div>
 					</div>
 				{:else if activeTab === 'debug'}
-					<div class="space-y-4">
+					<div class="space-y-6">
+						<!-- Search Index Rebuild -->
+						<div class="card p-4 space-y-3">
+							<div class="flex items-center gap-2 mb-1">
+								<Search class="w-4 h-4 text-[var(--accent)]" />
+								<h3 class="text-sm font-medium">Indice di Ricerca</h3>
+							</div>
+							<p class="text-xs opacity-50">
+								Ricostruisci l'indice full-text per la ricerca. Utile dopo import massivi o se la ricerca non trova risultati.
+							</p>
+							<div class="flex items-center justify-between gap-4">
+								<div class="flex items-center gap-2 text-xs opacity-50">
+									<Database class="w-3 h-3" />
+									<span>FTS5 SQLite</span>
+								</div>
+								<button
+									class="btn btn-primary btn-sm flex-shrink-0"
+									on:click={rebuildSearchIndex}
+									disabled={rebuildingIndex}
+								>
+									{#if rebuildingIndex}
+										<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+									{:else}
+										<RotateCcw class="w-4 h-4" />
+									{/if}
+									Ricostruisci Indice
+								</button>
+							</div>
+
+							{#if rebuildResult}
+								<div class="flex items-center gap-2 p-3 rounded-lg {rebuildResult.success ? 'bg-[var(--success)]/20' : 'bg-[var(--danger)]/20'}">
+									{#if rebuildResult.success}
+										<CheckCircle2 class="w-4 h-4 text-[var(--success)] flex-shrink-0" />
+										<span class="text-sm text-[var(--success)]">{rebuildResult.message}</span>
+									{:else}
+										<AlertCircle class="w-4 h-4 text-[var(--danger)] flex-shrink-0" />
+										<span class="text-sm text-[var(--danger)]">{rebuildResult.message}</span>
+									{/if}
+								</div>
+							{/if}
+						</div>
+
+						<!-- Test API Classification -->
 						<div>
 							<h3 class="text-sm font-medium mb-2">Test API Classification</h3>
 							<p class="text-xs opacity-50 mb-4">
