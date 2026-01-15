@@ -22,7 +22,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
 # Gemini API (recommended - FREE tier available)
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 GEMINI_MODEL_CLASSIFY = os.getenv("GEMINI_MODEL_CLASSIFY", "gemini-2.0-flash")
-GEMINI_MODEL_IMAGE = os.getenv("GEMINI_MODEL_IMAGE", "gemini-2.5-flash-preview-05-20")  # Higher quota for images
+GEMINI_MODEL_IMAGE = os.getenv("GEMINI_MODEL_IMAGE", "gemini-2.5-flash-image")  # Dedicated model for images
 GEMINI_MODEL_PICKS = os.getenv("GEMINI_MODEL_PICKS", "gemini-2.0-flash")
 
 # Claude API (fallback option)
