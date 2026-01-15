@@ -270,7 +270,7 @@ async def classify_image_with_gemini(image_bytes: bytes, mime_type: str, prompt:
         return None
 
     try:
-        from google.genai.types import GenerateContentConfig, GoogleSearch, Tool, Part, Content
+        from google.genai.types import GenerateContentConfig, Part, Content
 
         # Create multimodal content with image and text prompt (must specify role)
         contents = Content(
@@ -281,15 +281,13 @@ async def classify_image_with_gemini(image_bytes: bytes, mime_type: str, prompt:
             ]
         )
 
-        # Generate content with Google Search grounding
-        # Use dedicated image model for higher quota limits
+        # Generate content with dedicated image model (no search tool - not supported)
         response = gemini_client.models.generate_content(
             model=GEMINI_MODEL_IMAGE,
             contents=contents,
             config=GenerateContentConfig(
                 temperature=0.7,
-                max_output_tokens=2000,
-                tools=[Tool(google_search=GoogleSearch())]
+                max_output_tokens=2000
             )
         )
 
