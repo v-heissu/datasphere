@@ -14,10 +14,23 @@ from config import DATABASE_PATH
 
 # SQL Schema (base tables only)
 SCHEMA = """
+-- Users table for PWA authentication
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    display_name TEXT,
+    telegram_chat_id INTEGER,
+    is_active BOOLEAN DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP
+);
+
 -- Core items table
 CREATE TABLE IF NOT EXISTS items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     telegram_message_id INTEGER UNIQUE,
+    user_id INTEGER,
     verbatim_input TEXT NOT NULL,
 
     -- Classification (da Claude)
@@ -44,7 +57,33 @@ CREATE TABLE IF NOT EXISTS items (
 
     -- Feedback
     consumption_feedback TEXT,
-    notes TEXT
+    notes TEXT,
+
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- Push notification subscriptions
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    endpoint TEXT NOT NULL,
+    keys JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    UNIQUE(user_id, endpoint)
+);
+
+-- Activity log for tracking
+CREATE TABLE IF NOT EXISTS activity_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    action TEXT NOT NULL,
+    details JSON,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 -- User configuration
@@ -78,6 +117,10 @@ CREATE TABLE IF NOT EXISTS stats (
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type);
 CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
+CREATE INDEX IF NOT EXISTS idx_items_user ON items(user_id);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created_at);
 """
 
 # FTS5 Schema (separate for robustness)

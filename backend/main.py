@@ -8,13 +8,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 import uvicorn
 
-from config import API_HOST, API_PORT, DASHBOARD_URL
+from config import API_HOST, API_PORT, DASHBOARD_URL, VAPID_PUBLIC_KEY
 from database import (
     init_database,
     get_items_filtered,
@@ -29,10 +29,17 @@ from database import (
     search_suggestions,
     rebuild_fts_index
 )
-from llm_service import generate_daily_picks, get_daily_picks_with_items
+from llm_service import generate_daily_picks, get_daily_picks_with_items, classify_and_enrich, classify_and_enrich_image
 from telegram_bot import run_bot, create_bot_application
 from scheduler import init_scheduler, start_scheduler, stop_scheduler
 from models import ItemResponse, ItemUpdate, StatsResponse, EnrichmentData, SearchResponse, SearchResultItem
+from auth import (
+    UserCreate, UserLogin, UserResponse, TokenResponse, RefreshTokenRequest,
+    create_user, authenticate_user, get_user_by_username, get_user_by_id,
+    create_tokens, decode_token, require_auth, get_current_user, user_to_response,
+    save_push_subscription, get_push_subscriptions, delete_push_subscription
+)
+from database import save_item
 
 # Configure logging
 logging.basicConfig(
@@ -107,6 +114,249 @@ async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
+
+# ==================== Authentication Endpoints ====================
+
+@app.post("/api/auth/register", response_model=TokenResponse)
+async def register(user_data: UserCreate):
+    """Register a new user."""
+    # Check if username exists
+    existing = await get_user_by_username(user_data.username)
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="Username already registered"
+        )
+
+    # Create user
+    user_id = await create_user(
+        username=user_data.username,
+        password=user_data.password,
+        display_name=user_data.display_name
+    )
+
+    if not user_id:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create user"
+        )
+
+    # Get created user
+    user = await get_user_by_id(user_id)
+
+    # Generate tokens
+    tokens = create_tokens(user_id, user['username'])
+
+    return TokenResponse(
+        **tokens,
+        user=user_to_response(user)
+    )
+
+
+@app.post("/api/auth/login", response_model=TokenResponse)
+async def login(credentials: UserLogin):
+    """Login with username and password."""
+    user = await authenticate_user(credentials.username, credentials.password)
+
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password"
+        )
+
+    # Generate tokens
+    tokens = create_tokens(user['id'], user['username'])
+
+    return TokenResponse(
+        **tokens,
+        user=user_to_response(user)
+    )
+
+
+@app.post("/api/auth/refresh", response_model=TokenResponse)
+async def refresh_token(request: RefreshTokenRequest):
+    """Refresh access token using refresh token."""
+    payload = decode_token(request.refresh_token)
+
+    if not payload:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid refresh token"
+        )
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token type"
+        )
+
+    user_id = int(payload.get("sub", 0))
+    user = await get_user_by_id(user_id)
+
+    if not user or not user.get('is_active', True):
+        raise HTTPException(
+            status_code=401,
+            detail="User not found or inactive"
+        )
+
+    # Generate new tokens
+    tokens = create_tokens(user['id'], user['username'])
+
+    return TokenResponse(
+        **tokens,
+        user=user_to_response(user)
+    )
+
+
+@app.get("/api/auth/me", response_model=UserResponse)
+async def get_me(current_user: dict = Depends(require_auth)):
+    """Get current authenticated user."""
+    return user_to_response(current_user)
+
+
+# ==================== Direct Messaging Endpoints ====================
+
+@app.post("/api/messages")
+async def send_message(
+    request: Request,
+    current_user: dict = Depends(require_auth)
+):
+    """
+    Send a text message directly (replaces Telegram).
+    This endpoint processes the message through the LLM and saves it.
+    """
+    try:
+        body = await request.json()
+        text = body.get("text", "").strip()
+
+        if not text:
+            raise HTTPException(status_code=400, detail="Message text required")
+
+        logger.info(f"Processing message from user {current_user['username']}: {text[:50]}...")
+
+        # Process through LLM (same as Telegram)
+        result = await classify_and_enrich(text, msg_id=None)
+
+        # Update the item with user_id
+        from database import update_item
+        await update_item(result['id'], user_id=current_user['id'])
+
+        return {
+            "success": True,
+            "item": result
+        }
+
+    except Exception as e:
+        logger.error(f"Error processing message: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/messages/image")
+async def send_image(
+    image: UploadFile = File(...),
+    caption: Optional[str] = Form(None),
+    current_user: dict = Depends(require_auth)
+):
+    """
+    Send an image message directly (replaces Telegram photo).
+    Processes the image through the LLM and saves it.
+    """
+    try:
+        # Validate file type
+        if not image.content_type or not image.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="File must be an image")
+
+        # Read image bytes
+        image_bytes = await image.read()
+
+        if len(image_bytes) > 10 * 1024 * 1024:  # 10MB limit
+            raise HTTPException(status_code=400, detail="Image too large (max 10MB)")
+
+        logger.info(f"Processing image from user {current_user['username']}: {image.filename}")
+
+        # Process through LLM
+        result = await classify_and_enrich_image(
+            image_bytes=image_bytes,
+            mime_type=image.content_type,
+            caption=caption,
+            msg_id=None
+        )
+
+        # Update the item with user_id
+        from database import update_item
+        await update_item(result['id'], user_id=current_user['id'])
+
+        return {
+            "success": True,
+            "item": result
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Push Notifications Endpoints ====================
+
+@app.get("/api/push/vapid-public-key")
+async def get_vapid_key():
+    """Get VAPID public key for push notifications."""
+    return {"publicKey": VAPID_PUBLIC_KEY}
+
+
+@app.post("/api/push/subscribe")
+async def subscribe_push(
+    request: Request,
+    current_user: dict = Depends(require_auth)
+):
+    """Subscribe to push notifications."""
+    try:
+        subscription = await request.json()
+
+        if not subscription.get('endpoint'):
+            raise HTTPException(status_code=400, detail="Invalid subscription")
+
+        success = await save_push_subscription(current_user['id'], subscription)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save subscription")
+
+        return {"success": True}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error subscribing to push: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/push/unsubscribe")
+async def unsubscribe_push(
+    request: Request,
+    current_user: dict = Depends(require_auth)
+):
+    """Unsubscribe from push notifications."""
+    try:
+        body = await request.json()
+        endpoint = body.get('endpoint')
+
+        if not endpoint:
+            raise HTTPException(status_code=400, detail="Endpoint required")
+
+        success = await delete_push_subscription(current_user['id'], endpoint)
+
+        return {"success": success}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error unsubscribing from push: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Items Endpoints ====================
 
 @app.get("/api/items", response_model=List[ItemResponse])
 async def get_items(
