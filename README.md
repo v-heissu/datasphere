@@ -7,12 +7,14 @@ Sistema personale per catturare pensieri destrutturati via Telegram, classificar
 ## Features
 
 - **Cattura frictionless**: Manda un messaggio Telegram, fatto
-- **Classificazione AI**: Claude Sonnet 4.5 con web_search capisce cosa intendi
-- **Arricchimento automatico**: Link rilevanti (IMDb, Spotify, Wikipedia), stima tempo, suggerimenti
-- **Daily picks**: Suggerimenti personalizzati ogni mattina (Claude Haiku)
+- **Supporto foto**: Invia screenshot, copertine di libri, locandine di film - l'AI analizza le immagini
+- **Classificazione AI**: Gemini 2.0 Flash (gratuito) o Claude come fallback
+- **Ricerca full-text**: Cerca tra tutti i tuoi pensieri con autocomplete intelligente
+- **Arricchimento automatico**: Link rilevanti (IMDb, Spotify, Wikipedia, Amazon, Bandcamp), stima tempo
+- **Daily picks**: Suggerimenti personalizzati ogni mattina
 - **Weekly digest**: Email settimanale con recap e statistiche
 - **3 Modalità vista**: Cards, Tabella, Accordion
-- **Auto-archive**: I pensieri vecchi vengono archiviati, non persi
+- **Auto-archive**: I pensieri vecchi vengono archiviati dopo 30 giorni (configurabile)
 - **Dark mode**: Interfaccia dark responsive e mobile-friendly
 
 ## Quick Start
@@ -21,6 +23,7 @@ Sistema personale per catturare pensieri destrutturati via Telegram, classificar
 
 - Docker e Docker Compose
 - Token Telegram Bot (da [@BotFather](https://t.me/BotFather))
+- API Key Gemini (gratuita, da [aistudio.google.com](https://aistudio.google.com/apikey)) **oppure**
 - API Key Anthropic (da [console.anthropic.com](https://console.anthropic.com))
 
 ### 2. Setup
@@ -40,9 +43,15 @@ nano .env
 **Obbligatorie:**
 ```bash
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-CLAUDE_API_KEY=your_claude_api_key
 DASHBOARD_URL=https://tuo-dominio.it
+
+# Scegli UNO dei due provider AI:
+GEMINI_API_KEY=your_gemini_api_key    # Gratuito! 1500 req/giorno
+# oppure
+CLAUDE_API_KEY=your_claude_api_key    # ~$0.02-0.05/pensiero
 ```
+
+> **Raccomandato**: Usa Gemini, è gratuito e funziona benissimo. Claude viene usato come fallback se configurato.
 
 **Opzionali:**
 ```bash
@@ -90,19 +99,26 @@ Dashboard disponibile su `http://localhost:8000`
 
 ### Inviare pensieri
 
-Basta mandare un messaggio:
+**Testo** - Basta mandare un messaggio:
 - `Blade Runner 2049` → Film, link IMDb
 - `Thinking Fast and Slow` → Libro, link Amazon
 - `filosofia stoica` → Concetto, link Wikipedia
-- `ascoltare boards of canada` → Musica, link Spotify
+- `ascoltare boards of canada` → Musica, link Spotify/Bandcamp
 - `comprare latte` → Todo
+
+**Foto** - Invia un'immagine e l'AI la analizza:
+- Screenshot di un libro/film → Classificato automaticamente
+- Copertina di un album → Musica, link Spotify
+- Locandina di un evento → Evento, dettagli estratti
+- Puoi aggiungere una didascalia per contesto extra
 
 ### Dashboard
 
+- **Ricerca** - Barra di ricerca con autocomplete su tutti i campi
 - **Vista Cards/Table/Accordion** - Toggle in alto a destra
 - **Filtri** - Status (Coda, Fatti, Archivio) e tipo
 - **Daily Picks** - Suggerimenti AI bilanciati per tipo/tempo
-- **Settings** - Profilo utente, system prompt, test email
+- **Settings** - Profilo utente, system prompt, test email, debug API
 - **Copia** - Bottone su ogni card (hover)
 - **Auto-refresh** - Aggiornamento automatico ogni 30s
 
@@ -140,12 +156,18 @@ Usa PostgreSQL (Railway, Supabase, etc.) modificando `database.py`
 | `/api/items/{id}` | GET | Singolo item |
 | `/api/items/{id}` | PATCH | Aggiorna status/feedback |
 | `/api/items/{id}` | DELETE | Elimina item |
+| `/api/search` | GET | Ricerca full-text (FTS5) |
+| `/api/search/suggest` | GET | Autocomplete suggerimenti |
+| `/api/search/rebuild-index` | POST | Ricostruisci indice FTS |
 | `/api/stats` | GET | Statistiche utente |
 | `/api/daily-picks` | GET | Picks del giorno |
 | `/api/daily-picks/regenerate` | POST | Rigenera picks |
 | `/api/config` | GET | Tutte le configurazioni |
 | `/api/config/{key}` | GET/POST | Singola configurazione |
 | `/api/email/test` | POST | Invia email di test |
+| `/api/debug/test-classify` | POST | Test classificazione LLM |
+
+> API docs interattive disponibili su `/docs` (Swagger UI)
 
 ## Architecture
 
@@ -160,16 +182,18 @@ Usa PostgreSQL (Railway, Supabase, etc.) modificando `database.py`
 │      FastAPI Backend            │
 │  ┌─────────────────────────┐   │
 │  │  Telegram Handler       │   │
+│  │  (testo + foto)         │   │
 │  └───────────┬─────────────┘   │
 │              ▼                  │
 │  ┌─────────────────────────┐   │
-│  │  Claude AI Service      │   │
-│  │  - Sonnet + web_search  │   │
-│  │  - Haiku for picks      │   │
+│  │     LLM Service         │   │
+│  │  - Gemini 2.0 Flash     │   │
+│  │  - Gemini 2.5 (immagini)│   │
+│  │  - Claude (fallback)    │   │
 │  └───────────┬─────────────┘   │
 │              ▼                  │
 │  ┌─────────────────────────┐   │
-│  │    SQLite Database      │   │
+│  │  SQLite + FTS5 Search   │   │
 │  └─────────────────────────┘   │
 │                                 │
 │  ┌─────────────────────────┐   │
@@ -181,7 +205,7 @@ Usa PostgreSQL (Railway, Supabase, etc.) modificando `database.py`
 │                                 │
 │  ┌─────────────────────────┐   │
 │  │    Email Service        │   │
-│  │    (Gmail SMTP)         │   │
+│  │  (Gmail SMTP / Resend)  │   │
 │  └─────────────────────────┘   │
 └──────────────┼─────────────────┘
                │ HTTP
@@ -197,12 +221,12 @@ Usa PostgreSQL (Railway, Supabase, etc.) modificando `database.py`
 ```
 datasphere/
 ├── backend/
-│   ├── main.py           # FastAPI app
+│   ├── main.py           # FastAPI app + API endpoints
 │   ├── config.py         # Configuration
-│   ├── database.py       # SQLite operations
-│   ├── claude_service.py # Claude AI (Sonnet + Haiku)
-│   ├── telegram_bot.py   # Telegram bot
-│   ├── email_service.py  # Weekly digest email
+│   ├── database.py       # SQLite + FTS5 search
+│   ├── llm_service.py    # Gemini/Claude AI service
+│   ├── telegram_bot.py   # Telegram bot (testo + foto)
+│   ├── email_service.py  # Email (Gmail SMTP / Resend)
 │   ├── scheduler.py      # APScheduler jobs
 │   └── models.py         # Pydantic models
 ├── frontend/
@@ -215,6 +239,7 @@ datasphere/
 │   │       │   ├── ItemAccordion.svelte
 │   │       │   ├── DailyPicks.svelte
 │   │       │   ├── StatsWidget.svelte
+│   │       │   ├── SearchBar.svelte
 │   │       │   └── SettingsModal.svelte
 │   │       ├── stores.js
 │   │       └── api.js
@@ -227,13 +252,13 @@ datasphere/
 
 ## Tech Stack
 
-- **Backend**: FastAPI, Python 3.11, SQLite (aiosqlite)
-- **AI**: Claude Sonnet 4.5 (classify + web_search), Claude Haiku (picks)
+- **Backend**: FastAPI, Python 3.11, SQLite (aiosqlite), FTS5
+- **AI**: Gemini 2.0/2.5 Flash (gratuito, raccomandato) oppure Claude (fallback)
 - **Messaging**: python-telegram-bot (polling)
-- **Email**: smtplib (Gmail SMTP)
+- **Email**: Gmail SMTP oppure Resend API
 - **Scheduling**: APScheduler
-- **Frontend**: Svelte, SvelteKit, TailwindCSS
-- **Deploy**: Docker, Docker Compose
+- **Frontend**: Svelte 4, SvelteKit 2, TailwindCSS, Lucide icons
+- **Deploy**: Docker, Docker Compose, Railway
 
 ## Development
 
@@ -262,13 +287,23 @@ npm run dev
 - Check logs: `docker-compose logs -f`
 
 ### Classificazione fallisce
-- Verifica `CLAUDE_API_KEY` valido
-- Check quota API Anthropic
+- Verifica `GEMINI_API_KEY` o `CLAUDE_API_KEY`
+- Gemini: limite 1500 req/giorno (gratuito)
+- Claude: verifica quota API Anthropic
 
 ### Email non arriva
 - `EMAIL_ENABLED=true`?
 - Per Gmail usa App Password
 - Test: `POST /api/email/test`
+
+### Foto non classificata
+- Verifica che `GEMINI_API_KEY` sia configurata (richiesta per le immagini)
+- Formati supportati: JPEG, PNG, WebP
+- Immagini troppo grandi vengono ridimensionate automaticamente
+
+### Ricerca non funziona
+- L'indice FTS viene creato al primo avvio
+- Se corrotto: `POST /api/search/rebuild-index` oppure usa il bottone in Settings → Debug
 
 ### Database perso dopo deploy
 - Configura volume persistente su `/data`
@@ -276,8 +311,9 @@ npm run dev
 
 ## Costs
 
-Claude API con web_search: ~$0.02-0.05/pensiero
-Per 20 pensieri/giorno ≈ $12-30/mese
+**Gemini (raccomandato)**: Gratuito! 1500 richieste/giorno incluse.
+
+**Claude (fallback)**: ~$0.02-0.05/pensiero → Per 20 pensieri/giorno ≈ $12-30/mese
 
 ## License
 
