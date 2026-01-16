@@ -2,16 +2,51 @@
 <html lang="it" class="dark">
 	<head>
 		<meta charset="utf-8" />
-		<link rel="icon" href="%sveltekit.assets%/favicon.svg" type="image/svg+xml" />
-		<link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon.png" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="description" content="ThoughtCapture - Sistema personale per catturare e gestire pensieri ADHD" />
-		<meta name="theme-color" content="#0f0f0f" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+
+		<!-- PWA Meta Tags -->
+		<meta name="description" content="ThoughtCapture - Cattura e gestisci i tuoi pensieri con AI" />
+		<meta name="theme-color" content="#8b5cf6" />
 		<meta name="color-scheme" content="dark" />
+		<meta name="mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+		<meta name="apple-mobile-web-app-title" content="Thoughts" />
+		<meta name="application-name" content="ThoughtCapture" />
+		<meta name="msapplication-TileColor" content="#8b5cf6" />
+		<meta name="msapplication-tap-highlight" content="no" />
+		<meta name="format-detection" content="telephone=no" />
+
+		<!-- PWA Manifest -->
+		<link rel="manifest" href="/manifest.json" />
+
+		<!-- Favicons & Icons -->
+		<link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+		<link rel="icon" href="/icons/icon-96.png" type="image/png" sizes="96x96" />
+		<link rel="apple-touch-icon" href="/icons/icon-192.png" />
+		<link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png" />
+		<link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192.png" />
+		<link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-192.png" />
+
+		<!-- iOS Splash Screens -->
+		<meta name="apple-mobile-web-app-orientations" content="portrait" />
+
+		<!-- Preconnects for performance -->
+		<link rel="preconnect" href="/api" />
+
 		<title>ThoughtCapture</title>
 		%sveltekit.head%
+
+		<!-- Register Service Worker -->
+		<script>
+			if ('serviceWorker' in navigator) {
+				window.addEventListener('load', () => {
+					navigator.serviceWorker.register('/sw.js')
+						.then(reg => console.log('SW registered:', reg.scope))
+						.catch(err => console.error('SW registration failed:', err));
+				});
+			}
+		</script>
 	</head>
 	<body data-sveltekit-preload-data="hover">
 		<div style="display: contents">%sveltekit.body%</div>

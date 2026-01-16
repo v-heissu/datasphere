@@ -1,15 +1,15 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
-	import { RefreshCw, Settings, Brain, Inbox, CheckCircle2, Archive, LayoutGrid, List, AlignJustify } from 'lucide-svelte';
+	import { goto } from '$app/navigation';
+	import { RefreshCw, Brain, Inbox, CheckCircle2, Archive, LayoutGrid, List, AlignJustify, Plus } from 'lucide-svelte';
 	import StatsWidget from '$lib/components/StatsWidget.svelte';
 	import ItemCard from '$lib/components/ItemCard.svelte';
 	import ItemTable from '$lib/components/ItemTable.svelte';
 	import ItemAccordion from '$lib/components/ItemAccordion.svelte';
 	import DailyPicks from '$lib/components/DailyPicks.svelte';
-	import SettingsModal from '$lib/components/SettingsModal.svelte';
-	import SearchBar from '$lib/components/SearchBar.svelte';
 	import { getItems, getStats, getDailyPicks, updateItem, deleteItem, regeneratePicks, searchItems } from '$lib/api';
 	import { items, stats, statusFilter, typeFilter, dailyPicks, loading, error, searchQuery, searchResults, searchLoading, isSearchMode } from '$lib/stores';
+	import { isAuthenticated, currentUser } from '$lib/auth.js';
 
 	const itemTypes = ['film', 'book', 'concept', 'music', 'art', 'todo', 'other'];
 	const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
@@ -28,12 +28,19 @@
 	};
 
 	let picksLoading = false;
-	let showSettings = false;
 	let toast = null;
 	let refreshInterval = null;
 	let lastRefresh = Date.now();
 
 	onMount(async () => {
+		// Check authentication
+		const unsubscribe = isAuthenticated.subscribe(authenticated => {
+			if (!authenticated) {
+				goto('/login');
+				return;
+			}
+		});
+
 		await Promise.all([loadItems(), loadStats(), loadDailyPicks()]);
 		startAutoRefresh();
 
@@ -42,6 +49,8 @@
 
 		// Refresh on window focus
 		window.addEventListener('focus', handleWindowFocus);
+
+		return unsubscribe;
 	});
 
 	onDestroy(() => {
@@ -196,25 +205,6 @@
 		loadItems();
 	}
 
-	async function handleSearch(event) {
-		const { query } = event.detail;
-		$searchLoading = true;
-		try {
-			const response = await searchItems(query);
-			$searchResults = response.results;
-		} catch (e) {
-			console.error('Error searching:', e);
-			showToast('Errore nella ricerca', 'error');
-		} finally {
-			$searchLoading = false;
-		}
-	}
-
-	function handleSearchClear() {
-		$searchResults = null;
-		$searchQuery = '';
-		$isSearchMode = false;
-	}
 </script>
 
 <svelte:head>
@@ -224,43 +214,37 @@
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 </svelte:head>
 
-<main class="min-h-screen pb-safe">
-	<div class="container mx-auto px-3 sm:px-4 py-4 sm:py-8 max-w-6xl">
-		<!-- Header -->
-		<header class="mb-6 sm:mb-10 flex items-center justify-between gap-3">
-			<div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+<main class="min-h-screen">
+	<div class="container mx-auto px-3 sm:px-4 py-4 sm:py-6 max-w-lg sm:max-w-6xl">
+		<!-- Header - Simplified for mobile -->
+		<header class="mb-4 sm:mb-8 flex items-center justify-between gap-3">
+			<div class="flex items-center gap-2 sm:gap-3">
 				<div class="p-2 sm:p-2.5 rounded-xl sm:rounded-2xl bg-gradient-to-br from-[var(--accent)] to-purple-600">
 					<Brain class="w-5 h-5 sm:w-7 sm:h-7 text-white" />
 				</div>
-				<div class="hidden sm:block">
-					<h1 class="text-xl sm:text-3xl font-bold bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
+				<div>
+					<h1 class="text-lg sm:text-2xl font-bold text-white">
 						ThoughtCapture
 					</h1>
-					<p class="text-xs sm:text-sm opacity-50">Pensieri catturati, pronti da consumare</p>
+					<p class="text-xs text-[var(--text-muted)] hidden sm:block">Pensieri catturati, pronti da consumare</p>
 				</div>
 			</div>
 
-			<!-- Search Bar -->
-			<div class="flex-1 sm:flex-initial flex justify-end sm:justify-center">
-				<SearchBar on:search={handleSearch} on:clear={handleSearchClear} />
-			</div>
-
 			<button
-				class="btn btn-ghost btn-icon flex-shrink-0"
-				on:click={() => showSettings = true}
-				title="Impostazioni"
+				class="btn btn-ghost btn-icon"
+				on:click={loadItems}
+				disabled={$loading}
+				title="Ricarica"
 			>
-				<Settings class="w-5 h-5" />
+				<RefreshCw class="w-5 h-5 {$loading ? 'animate-spin' : ''}" />
 			</button>
 		</header>
 
-		<!-- Stats (hide in search mode) -->
-		{#if !$isSearchMode}
-			<StatsWidget stats={$stats} />
-		{/if}
+		<!-- Stats -->
+		<StatsWidget stats={$stats} />
 
-		<!-- Daily Picks (hide in search mode) -->
-		{#if $statusFilter === 'pending' && !$isSearchMode}
+		<!-- Daily Picks -->
+		{#if $statusFilter === 'pending'}
 			<DailyPicks
 				picks={$dailyPicks}
 				loading={picksLoading}
@@ -269,22 +253,8 @@
 			/>
 		{/if}
 
-		<!-- Search Results Header -->
-		{#if $isSearchMode}
-			<div class="mb-6 sm:mb-8">
-				<div class="flex items-center justify-between mb-4">
-					<h2 class="text-lg sm:text-xl font-semibold">
-						Risultati per "{$searchQuery}"
-						{#if $searchResults}
-							<span class="text-[var(--text-muted)] font-normal ml-2">({$searchResults.length})</span>
-						{/if}
-					</h2>
-				</div>
-			</div>
-		{/if}
-
-		<!-- Status Filters - Scrollable on mobile (hide in search mode) -->
-		<div class="flex items-center gap-2 mb-4 sm:mb-6 overflow-x-auto pb-2 -mx-3 px-3 sm:mx-0 sm:px-0 sm:overflow-visible sm:flex-wrap {$isSearchMode ? 'hidden' : ''}">
+		<!-- Status Filters - Scrollable on mobile -->
+		<div class="flex items-center gap-2 mb-4 sm:mb-6 overflow-x-auto pb-2 -mx-3 px-3 sm:mx-0 sm:px-0 sm:overflow-visible sm:flex-wrap">
 			<button
 				class="btn btn-sm sm:btn {$statusFilter === 'pending' ? 'btn-primary' : 'btn-secondary'} whitespace-nowrap flex-shrink-0"
 				on:click={() => handleStatusFilter('pending')}
@@ -340,18 +310,10 @@
 				</button>
 			</div>
 
-			<button
-				class="btn btn-ghost btn-icon flex-shrink-0"
-				on:click={loadItems}
-				disabled={$loading}
-				title="Ricarica"
-			>
-				<RefreshCw class="w-4 h-4 {$loading ? 'animate-spin' : ''}" />
-			</button>
 		</div>
 
-		<!-- Type filters - Scrollable on mobile (hide in search mode) -->
-		<div class="flex gap-2 mb-6 sm:mb-8 overflow-x-auto pb-2 -mx-3 px-3 sm:mx-0 sm:px-0 sm:overflow-visible sm:flex-wrap items-center {$isSearchMode ? 'hidden' : ''}">
+		<!-- Type filters - Scrollable on mobile -->
+		<div class="flex gap-2 mb-6 sm:mb-8 overflow-x-auto pb-2 -mx-3 px-3 sm:mx-0 sm:px-0 sm:overflow-visible sm:flex-wrap items-center">
 			<span class="text-xs sm:text-sm opacity-50 flex-shrink-0">Tipo:</span>
 			{#each itemTypes as type}
 				<button
@@ -373,38 +335,13 @@
 		</div>
 
 		<!-- Error message -->
-		{#if $error && !$isSearchMode}
+		{#if $error}
 			<div class="card border-[var(--danger)]/50 bg-[var(--danger)]/10 px-4 py-3 mb-6 text-[var(--danger)] text-sm">
 				{$error}
 			</div>
 		{/if}
 
-		<!-- Search Results -->
-		{#if $isSearchMode}
-			{#if $searchLoading}
-				<div class="text-center py-12 sm:py-16">
-					<RefreshCw class="w-8 h-8 sm:w-10 sm:h-10 animate-spin mx-auto text-[var(--accent)] opacity-50" />
-					<p class="opacity-40 mt-4 text-sm sm:text-base">Ricerca in corso...</p>
-				</div>
-			{:else if $searchResults && $searchResults.length === 0}
-				<div class="text-center py-12 sm:py-16">
-					<div class="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[var(--bg-secondary)] flex items-center justify-center mx-auto mb-4">
-						<svg class="w-8 h-8 sm:w-10 sm:h-10 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-						</svg>
-					</div>
-					<p class="opacity-50 text-base sm:text-lg">Nessun risultato trovato</p>
-					<p class="text-xs sm:text-sm opacity-30 mt-2">Prova con termini diversi</p>
-				</div>
-			{:else if $searchResults}
-				<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-					{#each $searchResults as item (item.id)}
-						<ItemCard {item} on:action={handleAction} />
-					{/each}
-				</div>
-			{/if}
-		{:else}
-			<!-- Normal Items grid -->
+		<!-- Items grid -->
 			{#if $loading && $items.length === 0}
 				<div class="text-center py-12 sm:py-16">
 					<RefreshCw class="w-8 h-8 sm:w-10 sm:h-10 animate-spin mx-auto text-[var(--accent)] opacity-50" />
@@ -431,7 +368,11 @@
 						{/if}
 					</p>
 					{#if $statusFilter === 'pending'}
-						<p class="text-xs sm:text-sm opacity-30 mt-2">Manda qualche pensiero su Telegram</p>
+						<p class="text-xs sm:text-sm opacity-30 mt-2">Tocca "Nuovo" per aggiungere un pensiero</p>
+						<a href="/chat" class="btn btn-primary mt-4 inline-flex">
+							<Plus class="w-4 h-4" />
+							<span>Nuovo pensiero</span>
+						</a>
 					{/if}
 				</div>
 			{:else}
@@ -447,12 +388,8 @@
 					<ItemAccordion items={$items} on:action={handleAction} />
 				{/if}
 			{/if}
-		{/if}
 	</div>
 </main>
-
-<!-- Settings Modal -->
-<SettingsModal bind:show={showSettings} on:saved={loadItems} />
 
 <!-- Toast -->
 {#if toast}

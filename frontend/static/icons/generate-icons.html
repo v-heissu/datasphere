@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PWA Icon Generator</title>
+    <style>
+        body { font-family: system-ui; padding: 20px; background: #1a1a1a; color: white; }
+        canvas { display: block; margin: 10px 0; }
+        .icon-row { display: flex; align-items: center; gap: 20px; margin: 10px 0; }
+        button { padding: 10px 20px; background: #8b5cf6; color: white; border: none; border-radius: 8px; cursor: pointer; }
+        button:hover { background: #7c3aed; }
+        a { color: #8b5cf6; }
+    </style>
+</head>
+<body>
+    <h1>ThoughtCapture PWA Icon Generator</h1>
+    <p>Click each button to download the icon, then place it in <code>/static/icons/</code></p>
+
+    <div id="icons"></div>
+
+    <script>
+        const sizes = [72, 96, 128, 144, 152, 192, 384, 512];
+
+        function createIcon(size) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+
+            // Background gradient
+            const gradient = ctx.createLinearGradient(0, 0, size, size);
+            gradient.addColorStop(0, '#8b5cf6');
+            gradient.addColorStop(1, '#6d28d9');
+
+            // Rounded rectangle
+            const radius = size / 5;
+            ctx.beginPath();
+            ctx.roundRect(0, 0, size, size, radius);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+
+            // Brain icon
+            ctx.strokeStyle = 'white';
+            ctx.fillStyle = 'white';
+            ctx.lineWidth = Math.max(2, size / 25);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            const cx = size / 2;
+            const cy = size / 2;
+            const s = size / 4; // scale factor
+
+            // Main brain outline
+            ctx.beginPath();
+            ctx.arc(cx, cy - s/4, s, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Inner detail
+            ctx.beginPath();
+            ctx.arc(cx - s/3, cy - s/4, s/2.5, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(cx + s/3, cy - s/4, s/2.5, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Thought sparks
+            ctx.lineWidth = Math.max(1.5, size / 35);
+
+            // Top right spark
+            ctx.beginPath();
+            ctx.moveTo(cx + s * 0.9, cy - s * 0.9);
+            ctx.lineTo(cx + s * 1.3, cy - s * 1.3);
+            ctx.stroke();
+
+            // Top left spark
+            ctx.beginPath();
+            ctx.moveTo(cx - s * 0.9, cy - s * 0.9);
+            ctx.lineTo(cx - s * 1.3, cy - s * 1.3);
+            ctx.stroke();
+
+            // Small dots
+            const dotSize = Math.max(2, size / 40);
+            ctx.beginPath();
+            ctx.arc(cx + s * 1.4, cy - s * 0.5, dotSize, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(cx - s * 1.4, cy - s * 0.5, dotSize, 0, Math.PI * 2);
+            ctx.fill();
+
+            return canvas;
+        }
+
+        const container = document.getElementById('icons');
+
+        sizes.forEach(size => {
+            const row = document.createElement('div');
+            row.className = 'icon-row';
+
+            const canvas = createIcon(size);
+
+            const link = document.createElement('a');
+            link.download = `icon-${size}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.textContent = `Download icon-${size}.png`;
+
+            const btn = document.createElement('button');
+            btn.textContent = `Download ${size}x${size}`;
+            btn.onclick = () => link.click();
+
+            row.appendChild(canvas);
+            row.appendChild(btn);
+            row.appendChild(link);
+            container.appendChild(row);
+        });
+
+        // Add download all button
+        const downloadAll = document.createElement('button');
+        downloadAll.textContent = 'Download All Icons';
+        downloadAll.style.marginTop = '20px';
+        downloadAll.onclick = () => {
+            sizes.forEach((size, i) => {
+                setTimeout(() => {
+                    const canvas = createIcon(size);
+                    const link = document.createElement('a');
+                    link.download = `icon-${size}.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                }, i * 200);
+            });
+        };
+        container.appendChild(downloadAll);
+    </script>
+</body>
+</html>
