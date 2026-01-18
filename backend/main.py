@@ -575,16 +575,17 @@ async def get_stats(current_user: dict = Depends(require_auth)):
 
 
 @app.get("/api/daily-picks")
-async def get_today_picks():
-    """Get or generate daily picks."""
+async def get_today_picks(current_user: dict = Depends(require_auth)):
+    """Get or generate daily picks for current user."""
     today = datetime.now().strftime('%Y-%m-%d')
+    user_id = current_user['id']
 
-    # Try to get existing picks
-    picks_data = await get_daily_picks_with_items(today)
+    # Try to get existing picks for this user
+    picks_data = await get_daily_picks_with_items(today, user_id=user_id)
 
     if not picks_data:
-        # Generate new picks
-        picks_data = await generate_daily_picks()
+        # Generate new picks for this user
+        picks_data = await generate_daily_picks(user_id=user_id)
 
     if not picks_data:
         return {"date": today, "picks": [], "total_estimated_time": 0, "message": ""}
@@ -593,9 +594,9 @@ async def get_today_picks():
 
 
 @app.post("/api/daily-picks/regenerate")
-async def regenerate_picks():
-    """Force regenerate daily picks."""
-    picks_data = await generate_daily_picks()
+async def regenerate_picks(current_user: dict = Depends(require_auth)):
+    """Force regenerate daily picks for current user."""
+    picks_data = await generate_daily_picks(user_id=current_user['id'])
 
     if not picks_data:
         raise HTTPException(status_code=500, detail="Failed to generate picks")
