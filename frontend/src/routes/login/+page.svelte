@@ -128,15 +128,27 @@
 						Password
 					</label>
 					<div class="relative">
-						<input
-							id="password"
-							type={showPassword ? 'text' : 'password'}
-							bind:value={password}
-							placeholder={mode === 'register' ? 'Minimo 6 caratteri' : 'La tua password'}
-							class="input pr-12"
-							autocomplete={mode === 'login' ? 'current-password' : 'new-password'}
-							disabled={loading}
-						/>
+						{#if showPassword}
+							<input
+								id="password"
+								type="text"
+								bind:value={password}
+								placeholder={mode === 'register' ? 'Minimo 6 caratteri' : 'La tua password'}
+								class="input pr-12"
+								autocomplete={mode === 'login' ? 'current-password' : 'new-password'}
+								disabled={loading}
+							/>
+						{:else}
+							<input
+								id="password"
+								type="password"
+								bind:value={password}
+								placeholder={mode === 'register' ? 'Minimo 6 caratteri' : 'La tua password'}
+								class="input pr-12"
+								autocomplete={mode === 'login' ? 'current-password' : 'new-password'}
+								disabled={loading}
+							/>
+						{/if}
 						<button
 							type="button"
 							class="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[var(--text-muted)] hover:text-white transition-colors"
