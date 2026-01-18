@@ -135,32 +135,31 @@ L'utente ti ha inviato un'IMMAGINE (es. screenshot, foto, copertina).
 {caption_context}
 
 TASK:
-1. ANALIZZA l'immagine per capire cosa rappresenta
-2. Se contiene testo (screenshot, articolo, post), estrai il contenuto principale
-3. Se è un'immagine di un prodotto/media (copertina libro, poster film, album), identificalo
-4. CERCA SU WEB per trovare informazioni aggiuntive se necessario
-5. Classifica e arricchisci come faresti con un pensiero testuale
+1. IDENTIFICA il contenuto: cosa rappresenta? (film, libro, concetto, prodotto, etc.)
+2. Se contiene testo (screenshot, articolo), estrai il contenuto principale
+3. CERCA SU WEB per trovare informazioni aggiuntive se necessario
+4. Classifica e arricchisci
 
 OUTPUT (SOLO JSON, NO markdown, NO testo aggiuntivo):
 {{
   "type": "film|book|concept|music|art|todo|other",
-  "title": "titolo identificato o descrizione breve",
-  "description": "cosa rappresenta l'immagine e info trovate (2-3 frasi)",
+  "title": "titolo identificato o concetto chiave",
+  "description": "info sul contenuto: di cosa parla, perché è interessante, contesto (2-3 frasi dirette, NO 'l'immagine mostra...')",
   "links": [
     {{"url": "link reale trovato", "type": "imdb|spotify|wikipedia|bandcamp|..."}}
   ],
   "estimated_minutes": 30,
   "priority": 3,
   "tags": ["tag1", "tag2", "tag3"],
-  "consumption_suggestion": "quando/come consumarlo",
-  "image_analysis": "breve descrizione di cosa mostra l'immagine"
+  "consumption_suggestion": "quando/come consumarlo"
 }}
 
 REGOLE CRITICHE:
-- Se è uno screenshot con testo, estrai il contenuto rilevante
-- Se è una copertina/poster, identifica il media
-- USA web search per arricchire con info reali
-- Se non riesci a identificare → type: "other", description: "Immagine non identificata"
+- RISPONDI AL CONTENUTO, non all'immagine: descrivi IL FILM, IL LIBRO, IL CONCETTO - non "l'immagine mostra un film..."
+- Se è uno screenshot con testo, estrai e riassumi il concetto
+- Se è una copertina/poster, identifica il media e descrivilo
+- USA web search per arricchire con info reali (trama, autore, anno, etc.)
+- Se non riesci a identificare → type: "other", title: concetto generico
 - RISPONDI SOLO CON JSON PURO
 """
 
@@ -513,8 +512,8 @@ async def classify_and_enrich_image(
         # Validate and normalize result
         result = normalize_classification(result)
 
-        # Build verbatim from caption or image analysis
-        verbatim = caption if caption else f"[Immagine: {result.get('image_analysis', 'analisi non disponibile')}]"
+        # Build verbatim from caption or title
+        verbatim = caption if caption else f"[Immagine: {result.get('title', 'contenuto non identificato')}]"
 
         # Save to database
         item_id = await save_item(
@@ -525,8 +524,7 @@ async def classify_and_enrich_image(
             description=result['description'],
             enrichment={
                 'links': result['links'],
-                'consumption_suggestion': result['consumption_suggestion'],
-                'image_analysis': result.get('image_analysis', '')
+                'consumption_suggestion': result['consumption_suggestion']
             },
             priority=result['priority'],
             estimated_minutes=result['estimated_minutes'],
