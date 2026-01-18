@@ -324,17 +324,19 @@ async def save_item(
     enrichment: Optional[Dict] = None,
     priority: int = 3,
     estimated_minutes: Optional[int] = None,
-    tags: Optional[List[str]] = None
+    tags: Optional[List[str]] = None,
+    user_id: Optional[int] = None
 ) -> int:
     """Save a new item to the database."""
     async with get_db() as db:
         cursor = await db.execute(
             """INSERT INTO items (
-                telegram_message_id, verbatim_input, item_type, title,
+                telegram_message_id, user_id, verbatim_input, item_type, title,
                 description, enrichment, priority, estimated_minutes, tags
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 telegram_message_id,
+                user_id,
                 verbatim_input,
                 item_type,
                 title,
@@ -437,12 +439,17 @@ async def delete_item(item_id: int) -> bool:
 async def get_items_filtered(
     status: Optional[str] = None,
     item_type: Optional[str] = None,
-    limit: int = 50
+    limit: int = 50,
+    user_id: Optional[int] = None
 ) -> List[Dict[str, Any]]:
-    """Get items filtered by status and type."""
+    """Get items filtered by status, type, and user."""
     async with get_db() as db:
         query = "SELECT * FROM items WHERE 1=1"
         params = []
+
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
 
         if status:
             query += " AND status = ?"
@@ -579,20 +586,36 @@ async def update_daily_stats(action: str):
         await db.commit()
 
 
-async def get_user_stats() -> Dict[str, Any]:
+async def get_user_stats(user_id: Optional[int] = None) -> Dict[str, Any]:
     """Get aggregated user statistics."""
     async with get_db() as db:
+        # Build user filter
+        user_filter = ""
+        user_params = []
+        if user_id is not None:
+            user_filter = " WHERE user_id = ?"
+            user_params = [user_id]
+
         # Total counts
-        cursor = await db.execute("SELECT COUNT(*) as count FROM items")
+        cursor = await db.execute(f"SELECT COUNT(*) as count FROM items{user_filter}", user_params)
         total_captured = (await cursor.fetchone())['count']
 
-        cursor = await db.execute("SELECT COUNT(*) as count FROM items WHERE status = 'consumed'")
+        cursor = await db.execute(
+            f"SELECT COUNT(*) as count FROM items WHERE status = 'consumed'{' AND user_id = ?' if user_id is not None else ''}",
+            user_params
+        )
         total_consumed = (await cursor.fetchone())['count']
 
-        cursor = await db.execute("SELECT COUNT(*) as count FROM items WHERE status = 'pending'")
+        cursor = await db.execute(
+            f"SELECT COUNT(*) as count FROM items WHERE status = 'pending'{' AND user_id = ?' if user_id is not None else ''}",
+            user_params
+        )
         pending = (await cursor.fetchone())['count']
 
-        cursor = await db.execute("SELECT COUNT(*) as count FROM items WHERE status = 'archived'")
+        cursor = await db.execute(
+            f"SELECT COUNT(*) as count FROM items WHERE status = 'archived'{' AND user_id = ?' if user_id is not None else ''}",
+            user_params
+        )
         archived = (await cursor.fetchone())['count']
 
         # Calculate streak
@@ -744,7 +767,8 @@ async def search_items(
     query: str,
     status: Optional[str] = None,
     item_type: Optional[str] = None,
-    limit: int = 50
+    limit: int = 50,
+    user_id: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """
     Full-text search across all item fields with prefix matching.
@@ -754,6 +778,7 @@ async def search_items(
         status: Optional filter by status
         item_type: Optional filter by item type
         limit: Maximum results to return
+        user_id: Optional filter by user
 
     Returns:
         List of matching items with search rank
@@ -771,6 +796,10 @@ async def search_items(
             WHERE items_fts MATCH ?
         """
         params = [fts_query]
+
+        if user_id is not None:
+            sql += " AND items.user_id = ?"
+            params.append(user_id)
 
         if status:
             sql += " AND items.status = ?"
@@ -796,7 +825,7 @@ async def search_items(
         return results
 
 
-async def search_suggestions(query: str, limit: int = 8) -> List[Dict[str, Any]]:
+async def search_suggestions(query: str, limit: int = 8, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Get search suggestions for autocomplete.
     Returns matching titles and snippets from descriptions.
@@ -819,12 +848,18 @@ async def search_suggestions(query: str, limit: int = 8) -> List[Dict[str, Any]]
             FROM items
             INNER JOIN items_fts ON items.id = items_fts.rowid
             WHERE items_fts MATCH ?
-            ORDER BY search_rank
-            LIMIT ?
         """
+        params = [fts_query]
+
+        if user_id is not None:
+            sql += " AND items.user_id = ?"
+            params.append(user_id)
+
+        sql += " ORDER BY search_rank LIMIT ?"
+        params.append(limit)
 
         try:
-            cursor = await db.execute(sql, [fts_query, limit])
+            cursor = await db.execute(sql, params)
             rows = await cursor.fetchall()
 
             suggestions = []
@@ -845,7 +880,8 @@ async def search_items_simple(
     query: str,
     status: Optional[str] = None,
     item_type: Optional[str] = None,
-    limit: int = 50
+    limit: int = 50,
+    user_id: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """
     Simple LIKE-based search fallback if FTS fails.
@@ -866,6 +902,10 @@ async def search_items_simple(
             )
         """
         params = [search_pattern] * 6
+
+        if user_id is not None:
+            sql += " AND user_id = ?"
+            params.append(user_id)
 
         if status:
             sql += " AND status = ?"

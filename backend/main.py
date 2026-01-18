@@ -235,11 +235,7 @@ async def send_message(
         logger.info(f"Processing message from user {current_user['username']}: {text[:50]}...")
 
         # Process through LLM (same as Telegram)
-        result = await classify_and_enrich(text, msg_id=None)
-
-        # Update the item with user_id
-        from database import update_item
-        await update_item(result['id'], user_id=current_user['id'])
+        result = await classify_and_enrich(text, msg_id=None, user_id=current_user['id'])
 
         return {
             "success": True,
@@ -279,12 +275,9 @@ async def send_image(
             image_bytes=image_bytes,
             mime_type=image.content_type,
             caption=caption,
-            msg_id=None
+            msg_id=None,
+            user_id=current_user['id']
         )
-
-        # Update the item with user_id
-        from database import update_item
-        await update_item(result['id'], user_id=current_user['id'])
 
         return {
             "success": True,
@@ -362,10 +355,11 @@ async def unsubscribe_push(
 async def get_items(
     status: str = Query("pending", description="Filter by status"),
     item_type: Optional[str] = Query(None, description="Filter by type"),
-    limit: int = Query(50, le=100, description="Max items to return")
+    limit: int = Query(50, le=100, description="Max items to return"),
+    current_user: dict = Depends(require_auth)
 ):
-    """Get items filtered by status and type."""
-    items = await get_items_filtered(status, item_type, limit)
+    """Get items filtered by status and type for current user."""
+    items = await get_items_filtered(status, item_type, limit, user_id=current_user['id'])
 
     # Convert to response model
     response = []
@@ -402,19 +396,20 @@ async def search(
     q: str = Query(..., min_length=1, description="Search query"),
     status: Optional[str] = Query(None, description="Filter by status"),
     item_type: Optional[str] = Query(None, description="Filter by type"),
-    limit: int = Query(50, le=100, description="Max results to return")
+    limit: int = Query(50, le=100, description="Max results to return"),
+    current_user: dict = Depends(require_auth)
 ):
     """
-    Full-text search across all item fields.
+    Full-text search across all item fields for current user.
     Searches in: title, description, verbatim_input, tags, notes, item_type.
     """
     try:
         # Try FTS5 search first
-        items = await search_items(q, status, item_type, limit)
+        items = await search_items(q, status, item_type, limit, user_id=current_user['id'])
     except Exception as e:
         # Fallback to simple LIKE search if FTS fails
         logger.warning(f"FTS search failed, using fallback: {e}")
-        items = await search_items_simple(q, status, item_type, limit)
+        items = await search_items_simple(q, status, item_type, limit, user_id=current_user['id'])
 
     # Convert to response model
     results = []
@@ -465,14 +460,15 @@ async def rebuild_search_index():
 @app.get("/api/search/suggest")
 async def get_search_suggestions(
     q: str = Query(..., min_length=2, description="Search query for suggestions"),
-    limit: int = Query(8, le=20, description="Max suggestions to return")
+    limit: int = Query(8, le=20, description="Max suggestions to return"),
+    current_user: dict = Depends(require_auth)
 ):
     """
-    Get search suggestions for autocomplete.
+    Get search suggestions for autocomplete for current user.
     Returns matching titles and description snippets.
     """
     try:
-        suggestions = await search_suggestions(q, limit)
+        suggestions = await search_suggestions(q, limit, user_id=current_user['id'])
         return {"query": q, "suggestions": suggestions}
     except Exception as e:
         logger.warning(f"Suggestions failed: {e}")
@@ -480,10 +476,14 @@ async def get_search_suggestions(
 
 
 @app.get("/api/items/{item_id}", response_model=ItemResponse)
-async def get_item(item_id: int):
-    """Get single item by ID."""
+async def get_item(item_id: int, current_user: dict = Depends(require_auth)):
+    """Get single item by ID (only if owned by current user)."""
     item = await get_item_by_id(item_id)
     if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # Check ownership
+    if item.get('user_id') is not None and item['user_id'] != current_user['id']:
         raise HTTPException(status_code=404, detail="Item not found")
 
     enrichment = item.get('enrichment', {})
@@ -512,11 +512,15 @@ async def get_item(item_id: int):
 
 
 @app.patch("/api/items/{item_id}")
-async def update_item(item_id: int, update: ItemUpdate):
-    """Update item status/feedback."""
+async def update_item_endpoint(item_id: int, update: ItemUpdate, current_user: dict = Depends(require_auth)):
+    """Update item status/feedback (only if owned by current user)."""
     # Check item exists
     item = await get_item_by_id(item_id)
     if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # Check ownership
+    if item.get('user_id') is not None and item['user_id'] != current_user['id']:
         raise HTTPException(status_code=404, detail="Item not found")
 
     success = await update_item_status(
@@ -533,13 +537,17 @@ async def update_item(item_id: int, update: ItemUpdate):
 
 
 @app.delete("/api/items/{item_id}")
-async def delete_item(item_id: int):
-    """Delete an item permanently."""
+async def delete_item_endpoint(item_id: int, current_user: dict = Depends(require_auth)):
+    """Delete an item permanently (only if owned by current user)."""
     from database import delete_item as db_delete_item
 
     # Check item exists
     item = await get_item_by_id(item_id)
     if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # Check ownership
+    if item.get('user_id') is not None and item['user_id'] != current_user['id']:
         raise HTTPException(status_code=404, detail="Item not found")
 
     success = await db_delete_item(item_id)
@@ -551,9 +559,9 @@ async def delete_item(item_id: int):
 
 
 @app.get("/api/stats", response_model=StatsResponse)
-async def get_stats():
-    """Get user statistics."""
-    stats = await get_user_stats()
+async def get_stats(current_user: dict = Depends(require_auth)):
+    """Get user statistics for current user."""
+    stats = await get_user_stats(user_id=current_user['id'])
 
     return StatsResponse(
         total_captured=stats['total_captured'],

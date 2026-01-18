@@ -399,7 +399,7 @@ async def generate_picks_with_claude(prompt: str) -> Optional[Dict]:
         return None
 
 
-async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Dict[str, Any]:
+async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None, user_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Classifica e arricchisce un pensiero usando l'LLM configurato.
     """
@@ -456,7 +456,8 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
             },
             priority=result['priority'],
             estimated_minutes=result['estimated_minutes'],
-            tags=result['tags']
+            tags=result['tags'],
+            user_id=user_id
         )
 
         result['id'] = item_id
@@ -465,14 +466,15 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
 
     except Exception as e:
         logger.error(f"Error classifying thought: {e}", exc_info=True)
-        return await create_fallback_result(verbatim, msg_id)
+        return await create_fallback_result(verbatim, msg_id, user_id)
 
 
 async def classify_and_enrich_image(
     image_bytes: bytes,
     mime_type: str,
     caption: Optional[str] = None,
-    msg_id: Optional[int] = None
+    msg_id: Optional[int] = None,
+    user_id: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Classifica e arricchisce un'immagine usando Gemini multimodale.
@@ -481,7 +483,7 @@ async def classify_and_enrich_image(
 
     if not gemini_client:
         logger.error("Gemini not initialized - image classification requires Gemini")
-        return await create_image_fallback_result(caption, msg_id)
+        return await create_image_fallback_result(caption, msg_id, user_id)
 
     try:
         # Get context
@@ -528,7 +530,8 @@ async def classify_and_enrich_image(
             },
             priority=result['priority'],
             estimated_minutes=result['estimated_minutes'],
-            tags=result['tags']
+            tags=result['tags'],
+            user_id=user_id
         )
 
         result['id'] = item_id
@@ -537,10 +540,10 @@ async def classify_and_enrich_image(
 
     except Exception as e:
         logger.error(f"Error classifying image: {e}", exc_info=True)
-        return await create_image_fallback_result(caption, msg_id)
+        return await create_image_fallback_result(caption, msg_id, user_id)
 
 
-async def create_image_fallback_result(caption: Optional[str], msg_id: Optional[int] = None) -> Dict[str, Any]:
+async def create_image_fallback_result(caption: Optional[str], msg_id: Optional[int] = None, user_id: Optional[int] = None) -> Dict[str, Any]:
     """Create fallback result when image classification fails."""
     logger.warning("Creating fallback for image")
 
@@ -571,7 +574,8 @@ async def create_image_fallback_result(caption: Optional[str], msg_id: Optional[
         },
         priority=result['priority'],
         estimated_minutes=result['estimated_minutes'],
-        tags=result['tags']
+        tags=result['tags'],
+        user_id=user_id
     )
 
     result['id'] = item_id
@@ -594,10 +598,10 @@ def normalize_classification(result: Dict) -> Dict:
     }
 
 
-async def create_fallback_result(verbatim: str, msg_id: Optional[int] = None) -> Dict[str, Any]:
+async def create_fallback_result(verbatim: str, msg_id: Optional[int] = None, user_id: Optional[int] = None) -> Dict[str, Any]:
     """Create fallback result when classification fails."""
     logger.warning(f"Creating fallback for: {verbatim[:50]}")
-    
+
     result = {
         'type': 'other',
         'title': verbatim[:50] + ('...' if len(verbatim) > 50 else ''),
@@ -622,7 +626,8 @@ async def create_fallback_result(verbatim: str, msg_id: Optional[int] = None) ->
         },
         priority=result['priority'],
         estimated_minutes=result['estimated_minutes'],
-        tags=result['tags']
+        tags=result['tags'],
+        user_id=user_id
     )
 
     result['id'] = item_id
