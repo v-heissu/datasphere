@@ -632,10 +632,10 @@ async def create_fallback_result(verbatim: str, msg_id: Optional[int] = None, us
     return result
 
 
-async def generate_daily_picks() -> Optional[Dict[str, Any]]:
-    """Genera suggerimenti giornalieri."""
-    logger.info(f"Generating daily picks with {LLM_PROVIDER}")
-    
+async def generate_daily_picks(user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """Genera suggerimenti giornalieri per un utente."""
+    logger.info(f"Generating daily picks with {LLM_PROVIDER} for user {user_id}")
+
     if LLM_PROVIDER == "gemini" and not gemini_client:
         logger.error("Gemini not initialized")
         return None
@@ -645,7 +645,7 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
 
     try:
         user_background = await get_config('user_background', '')
-        pending_items = await get_pending_items_for_picks(limit=50)
+        pending_items = await get_pending_items_for_picks(limit=50, user_id=user_id)
 
         if not pending_items:
             logger.info("No pending items for daily picks")
@@ -678,6 +678,9 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
         for pick in result.get('picks', []):
             item = await get_item_by_id(pick.get('item_id'))
             if item and item['status'] == 'pending':
+                # Verify item belongs to user
+                if user_id is not None and item.get('user_id') != user_id:
+                    continue
                 valid_picks.append({
                     'item_id': pick['item_id'],
                     'reason': pick.get('reason', ''),
@@ -694,10 +697,11 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
             date=today,
             picks=[{'item_id': p['item_id'], 'reason': p['reason']} for p in valid_picks],
             total_time=total_time,
-            message=result.get('message', '')
+            message=result.get('message', ''),
+            user_id=user_id
         )
 
-        logger.info(f"Generated {len(valid_picks)} picks for {today}")
+        logger.info(f"Generated {len(valid_picks)} picks for {today} user {user_id}")
         return {
             'date': today,
             'picks': valid_picks,
@@ -710,11 +714,11 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
         return None
 
 
-async def get_daily_picks_with_items(date: str) -> Optional[Dict[str, Any]]:
-    """Get daily picks with full item details."""
+async def get_daily_picks_with_items(date: str, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """Get daily picks with full item details for a user."""
     from database import get_daily_picks_for_date
 
-    picks_data = await get_daily_picks_for_date(date)
+    picks_data = await get_daily_picks_for_date(date, user_id=user_id)
     if not picks_data:
         return None
 

@@ -93,14 +93,18 @@ CREATE TABLE IF NOT EXISTS user_config (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Daily picks history
+-- Daily picks history (per user)
 CREATE TABLE IF NOT EXISTS daily_picks (
-    date TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    date TEXT NOT NULL,
     picks_json TEXT,
     total_estimated_time INTEGER DEFAULT 0,
     message TEXT,
     consumed_count INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    UNIQUE(user_id, date)
 );
 
 -- User stats (denormalized for performance)
@@ -121,6 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_items_user ON items(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_daily_picks_user_date ON daily_picks(user_id, date);
 """
 
 # FTS5 Schema (separate for robustness)
@@ -492,15 +497,21 @@ async def get_items_older_than(days: int, status: str = 'pending') -> List[Dict[
         return [row_to_dict(row) for row in rows]
 
 
-async def get_pending_items_for_picks(limit: int = 50) -> List[Dict[str, Any]]:
+async def get_pending_items_for_picks(limit: int = 50, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get pending items formatted for daily picks generation."""
     async with get_db() as db:
-        cursor = await db.execute(
-            """SELECT id, item_type, title, estimated_minutes, priority, created_at
-               FROM items WHERE status = 'pending'
-               ORDER BY priority DESC, created_at ASC LIMIT ?""",
-            (limit,)
-        )
+        query = """SELECT id, item_type, title, estimated_minutes, priority, created_at
+               FROM items WHERE status = 'pending'"""
+        params = []
+
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
+
+        query += " ORDER BY priority DESC, created_at ASC LIMIT ?"
+        params.append(limit)
+
+        cursor = await db.execute(query, params)
         rows = await cursor.fetchall()
 
         items = []
@@ -515,12 +526,17 @@ async def get_pending_items_for_picks(limit: int = 50) -> List[Dict[str, Any]]:
 
 # Daily picks operations
 
-async def get_daily_picks_for_date(date: str) -> Optional[Dict[str, Any]]:
-    """Get daily picks for a specific date."""
+async def get_daily_picks_for_date(date: str, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """Get daily picks for a specific date and user."""
     async with get_db() as db:
-        cursor = await db.execute(
-            "SELECT * FROM daily_picks WHERE date = ?", (date,)
-        )
+        if user_id is not None:
+            cursor = await db.execute(
+                "SELECT * FROM daily_picks WHERE date = ? AND user_id = ?", (date, user_id)
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT * FROM daily_picks WHERE date = ? AND user_id IS NULL", (date,)
+            )
         row = await cursor.fetchone()
 
         if not row:
@@ -535,15 +551,15 @@ async def get_daily_picks_for_date(date: str) -> Optional[Dict[str, Any]]:
         return d
 
 
-async def save_daily_picks(date: str, picks: List[Dict], total_time: int = 0, message: str = ''):
-    """Save daily picks for a date."""
+async def save_daily_picks(date: str, picks: List[Dict], total_time: int = 0, message: str = '', user_id: Optional[int] = None):
+    """Save daily picks for a date and user."""
     async with get_db() as db:
         await db.execute(
-            """INSERT INTO daily_picks (date, picks_json, total_estimated_time, message)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT(date) DO UPDATE SET
+            """INSERT INTO daily_picks (user_id, date, picks_json, total_estimated_time, message)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, date) DO UPDATE SET
                picks_json = ?, total_estimated_time = ?, message = ?""",
-            (date, json.dumps(picks), total_time, message,
+            (user_id, date, json.dumps(picks), total_time, message,
              json.dumps(picks), total_time, message)
         )
         await db.commit()
