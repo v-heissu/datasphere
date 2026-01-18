@@ -157,6 +157,32 @@ async function tryRefreshToken() {
 	return false;
 }
 
+// Parse API error response
+function parseApiError(error) {
+	if (!error.detail) return 'Errore sconosciuto';
+
+	// FastAPI validation errors are arrays
+	if (Array.isArray(error.detail)) {
+		const firstError = error.detail[0];
+		if (firstError?.msg) {
+			// Make error message more user-friendly
+			const field = firstError.loc?.[1] || 'campo';
+			const msg = firstError.msg;
+			if (msg.includes('pattern')) {
+				return `Username può contenere solo lettere, numeri, _, @, . e -`;
+			}
+			if (msg.includes('at least')) {
+				return `${field} troppo corto`;
+			}
+			return `${field}: ${msg}`;
+		}
+		return error.detail.map(e => e.msg || e).join(', ');
+	}
+
+	// Simple string error
+	return String(error.detail);
+}
+
 // Register a new user
 export async function register(username, password, displayName = null) {
 	authLoading.set(true);
@@ -174,8 +200,8 @@ export async function register(username, password, displayName = null) {
 		});
 
 		if (!response.ok) {
-			const error = await response.json().catch(() => ({ detail: 'Registration failed' }));
-			throw new Error(error.detail || 'Registration failed');
+			const error = await response.json().catch(() => ({ detail: 'Registrazione fallita' }));
+			throw new Error(parseApiError(error));
 		}
 
 		const data = await response.json();
@@ -203,8 +229,8 @@ export async function login(username, password) {
 		});
 
 		if (!response.ok) {
-			const error = await response.json().catch(() => ({ detail: 'Login failed' }));
-			throw new Error(error.detail || 'Login failed');
+			const error = await response.json().catch(() => ({ detail: 'Login fallito' }));
+			throw new Error(parseApiError(error));
 		}
 
 		const data = await response.json();

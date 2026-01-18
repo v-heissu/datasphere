@@ -31,7 +31,7 @@ security = HTTPBearer(auto_error=False)
 
 class UserCreate(BaseModel):
     """User registration request."""
-    username: str = Field(..., min_length=3, max_length=50, pattern=r'^[a-zA-Z0-9_]+$')
+    username: str = Field(..., min_length=3, max_length=100, pattern=r'^[a-zA-Z0-9_@.\-]+$')
     password: str = Field(..., min_length=6, max_length=100)
     display_name: Optional[str] = Field(None, max_length=100)
 
