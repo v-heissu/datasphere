@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { Home, MessageSquarePlus, Search, Settings, User } from 'lucide-svelte';
 	import { initAuth, isAuthenticated, authLoading, currentUser } from '$lib/auth.js';
+	import InstallPrompt from '$lib/components/InstallPrompt.svelte';
 	import '../app.css';
 
 	// Pages that don't need auth
@@ -89,6 +90,11 @@
 				{/each}
 			</div>
 		</nav>
+	{/if}
+
+	<!-- Install PWA Prompt -->
+	{#if $isAuthenticated}
+		<InstallPrompt />
 	{/if}
 {/if}
 
