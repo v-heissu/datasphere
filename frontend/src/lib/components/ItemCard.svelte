@@ -89,12 +89,12 @@
 </script>
 
 <div class="card type-{itemType} animate-fade-in group">
-	<div class="p-5">
+	<div class="p-4 sm:p-5">
 		<!-- Header -->
-		<div class="flex items-start justify-between gap-4 mb-4">
+		<div class="flex items-start justify-between gap-3 mb-3">
 			<div class="flex-1 min-w-0">
-				<div class="flex items-center gap-2 mb-2">
-					<span class="text-lg">{typeIcon[itemType] || typeIcon.other}</span>
+				<div class="flex items-center gap-2 mb-1.5">
+					<span class="text-base sm:text-lg">{typeIcon[itemType] || typeIcon.other}</span>
 					<span class="text-xs font-semibold uppercase tracking-wider opacity-70">
 						{typeLabel[itemType] || typeLabel.other}
 					</span>
@@ -104,11 +104,11 @@
 						</span>
 					{/if}
 				</div>
-				<h3 class="font-bold text-lg leading-tight">{item.title || 'Senza titolo'}</h3>
+				<h3 class="font-bold text-base sm:text-lg leading-snug">{item.title || 'Senza titolo'}</h3>
 			</div>
-			<div class="flex items-center gap-2 shrink-0">
+			<div class="flex items-center gap-1.5 shrink-0">
 				<button
-					class="btn btn-ghost btn-icon opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+					class="btn btn-ghost btn-icon btn-sm sm:opacity-0 sm:group-hover:opacity-60 hover:!opacity-100 transition-opacity"
 					title={copied ? 'Copiato!' : 'Copia'}
 					on:click={copyCard}
 				>
@@ -118,8 +118,8 @@
 						<Copy class="w-4 h-4" />
 					{/if}
 				</button>
-				<div class="flex items-center gap-1.5 text-sm opacity-60">
-					<Clock class="w-4 h-4" />
+				<div class="flex items-center gap-1 text-xs sm:text-sm opacity-60">
+					<Clock class="w-3.5 h-3.5 sm:w-4 sm:h-4" />
 					<span>{item.estimated_minutes || '?'}min</span>
 				</div>
 			</div>
@@ -127,22 +127,25 @@
 
 		<!-- Description -->
 		{#if item.description}
-			<p class="text-sm opacity-70 mb-4 leading-relaxed">{item.description}</p>
+			<p class="text-sm opacity-70 mb-3 leading-relaxed line-clamp-3">{item.description}</p>
 		{/if}
 
-		<!-- Original query (verbatim) -->
+		<!-- Original query (verbatim) - hidden on mobile for space -->
 		{#if item.verbatim_input}
-			<p class="text-xs opacity-40 mb-4 italic border-l-2 border-white/10 pl-3">
+			<p class="hidden sm:block text-xs opacity-40 mb-3 italic border-l-2 border-white/10 pl-3 line-clamp-2">
 				"{item.verbatim_input}"
 			</p>
 		{/if}
 
 		<!-- Tags -->
 		{#if item.tags && item.tags.length > 0}
-			<div class="flex gap-1.5 mb-4 flex-wrap">
-				{#each item.tags as tag}
-					<span class="text-xs px-2 py-1 rounded-lg bg-white/5 border border-white/10">{tag}</span>
+			<div class="flex gap-1.5 mb-3 flex-wrap">
+				{#each item.tags.slice(0, 4) as tag}
+					<span class="text-xs px-2 py-0.5 rounded-lg bg-white/5 border border-white/10">{tag}</span>
 				{/each}
+				{#if item.tags.length > 4}
+					<span class="text-xs px-2 py-0.5 opacity-40">+{item.tags.length - 4}</span>
+				{/if}
 			</div>
 		{/if}
 
