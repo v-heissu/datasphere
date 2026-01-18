@@ -183,6 +183,10 @@ def init_database():
 
     logger.info(f"Initializing database at: {DATABASE_PATH}")
     conn = sqlite3.connect(DATABASE_PATH)
+
+    # Run migrations first (before main schema)
+    run_migrations(conn, logger)
+
     conn.executescript(SCHEMA)
 
     # Insert default config
@@ -197,6 +201,27 @@ def init_database():
 
     # Initialize FTS separately (more robust)
     init_fts()
+
+
+def run_migrations(conn, logger):
+    """Run database migrations for schema updates."""
+    cursor = conn.cursor()
+
+    # Migration 1: daily_picks table needs user_id column
+    # Check if daily_picks exists with old schema (no user_id)
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='daily_picks'")
+    if cursor.fetchone():
+        # Check if user_id column exists
+        cursor.execute("PRAGMA table_info(daily_picks)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'user_id' not in columns:
+            logger.info("Migration: Dropping old daily_picks table (no user_id)")
+            cursor.execute("DROP TABLE daily_picks")
+            conn.commit()
+
+    # Migration 2: stats table - drop if exists (will be recreated, it's just cache)
+    # This ensures clean slate for per-user stats
+    # (stats table doesn't have user_id and is just a cache anyway)
 
 
 def init_fts():
