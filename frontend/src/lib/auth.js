@@ -98,9 +98,11 @@ const API_BASE = '/api';
 // Make authenticated request
 export async function authFetch(endpoint, options = {}) {
 	const token = get(accessToken);
+	const isFormData = options.body instanceof FormData;
 
+	// Don't set Content-Type for FormData - browser sets it with boundary
 	const headers = {
-		'Content-Type': 'application/json',
+		...(isFormData ? {} : { 'Content-Type': 'application/json' }),
 		...options.headers
 	};
 
