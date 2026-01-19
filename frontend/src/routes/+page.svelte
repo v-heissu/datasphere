@@ -1,12 +1,14 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { browser } from '$app/environment';
 	import { RefreshCw, Brain, Inbox, CheckCircle2, Archive, LayoutGrid, List, AlignJustify, Plus } from 'lucide-svelte';
 	import StatsWidget from '$lib/components/StatsWidget.svelte';
 	import ItemCard from '$lib/components/ItemCard.svelte';
 	import ItemTable from '$lib/components/ItemTable.svelte';
 	import ItemAccordion from '$lib/components/ItemAccordion.svelte';
 	import DailyPicks from '$lib/components/DailyPicks.svelte';
+	import OnboardingModal from '$lib/components/OnboardingModal.svelte';
 	import { getItems, getStats, getDailyPicks, updateItem, deleteItem, regeneratePicks, searchItems } from '$lib/api';
 	import { items, stats, statusFilter, typeFilter, dailyPicks, loading, error, searchQuery, searchResults, searchLoading, isSearchMode } from '$lib/stores';
 	import { isAuthenticated, currentUser } from '$lib/auth.js';
@@ -31,8 +33,13 @@
 	let toast = null;
 	let refreshInterval = null;
 	let lastRefresh = Date.now();
+	let showOnboarding = false;
 
 	onMount(async () => {
+		// Check if onboarding was completed
+		if (browser && !localStorage.getItem('onboarding_completed')) {
+			showOnboarding = true;
+		}
 		// Check authentication
 		const unsubscribe = isAuthenticated.subscribe(authenticated => {
 			if (!authenticated) {
@@ -205,6 +212,9 @@
 		loadItems();
 	}
 
+	function handleOnboardingClose() {
+		showOnboarding = false;
+	}
 </script>
 
 <svelte:head>
@@ -399,3 +409,6 @@
 		</span>
 	</div>
 {/if}
+
+<!-- Onboarding Modal -->
+<OnboardingModal show={showOnboarding} onClose={handleOnboardingClose} />
