@@ -14,10 +14,23 @@ from config import DATABASE_PATH
 
 # SQL Schema (base tables only)
 SCHEMA = """
+-- Users table for PWA authentication
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    display_name TEXT,
+    telegram_chat_id INTEGER,
+    is_active BOOLEAN DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP
+);
+
 -- Core items table
 CREATE TABLE IF NOT EXISTS items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     telegram_message_id INTEGER UNIQUE,
+    user_id INTEGER,
     verbatim_input TEXT NOT NULL,
 
     -- Classification (da Claude)
@@ -44,7 +57,33 @@ CREATE TABLE IF NOT EXISTS items (
 
     -- Feedback
     consumption_feedback TEXT,
-    notes TEXT
+    notes TEXT,
+
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- Push notification subscriptions
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    endpoint TEXT NOT NULL,
+    keys JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    UNIQUE(user_id, endpoint)
+);
+
+-- Activity log for tracking
+CREATE TABLE IF NOT EXISTS activity_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    action TEXT NOT NULL,
+    details JSON,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 -- User configuration
@@ -54,14 +93,18 @@ CREATE TABLE IF NOT EXISTS user_config (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Daily picks history
+-- Daily picks history (per user)
 CREATE TABLE IF NOT EXISTS daily_picks (
-    date TEXT PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    date TEXT NOT NULL,
     picks_json TEXT,
     total_estimated_time INTEGER DEFAULT 0,
     message TEXT,
     consumed_count INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    UNIQUE(user_id, date)
 );
 
 -- User stats (denormalized for performance)
@@ -78,6 +121,11 @@ CREATE TABLE IF NOT EXISTS stats (
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_type ON items(item_type);
 CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
+CREATE INDEX IF NOT EXISTS idx_items_user ON items(user_id);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_daily_picks_user_date ON daily_picks(user_id, date);
 """
 
 # FTS5 Schema (separate for robustness)
@@ -135,6 +183,10 @@ def init_database():
 
     logger.info(f"Initializing database at: {DATABASE_PATH}")
     conn = sqlite3.connect(DATABASE_PATH)
+
+    # Run migrations first (before main schema)
+    run_migrations(conn, logger)
+
     conn.executescript(SCHEMA)
 
     # Insert default config
@@ -149,6 +201,27 @@ def init_database():
 
     # Initialize FTS separately (more robust)
     init_fts()
+
+
+def run_migrations(conn, logger):
+    """Run database migrations for schema updates."""
+    cursor = conn.cursor()
+
+    # Migration 1: daily_picks table needs user_id column
+    # Check if daily_picks exists with old schema (no user_id)
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='daily_picks'")
+    if cursor.fetchone():
+        # Check if user_id column exists
+        cursor.execute("PRAGMA table_info(daily_picks)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'user_id' not in columns:
+            logger.info("Migration: Dropping old daily_picks table (no user_id)")
+            cursor.execute("DROP TABLE daily_picks")
+            conn.commit()
+
+    # Migration 2: stats table - drop if exists (will be recreated, it's just cache)
+    # This ensures clean slate for per-user stats
+    # (stats table doesn't have user_id and is just a cache anyway)
 
 
 def init_fts():
@@ -281,17 +354,19 @@ async def save_item(
     enrichment: Optional[Dict] = None,
     priority: int = 3,
     estimated_minutes: Optional[int] = None,
-    tags: Optional[List[str]] = None
+    tags: Optional[List[str]] = None,
+    user_id: Optional[int] = None
 ) -> int:
     """Save a new item to the database."""
     async with get_db() as db:
         cursor = await db.execute(
             """INSERT INTO items (
-                telegram_message_id, verbatim_input, item_type, title,
+                telegram_message_id, user_id, verbatim_input, item_type, title,
                 description, enrichment, priority, estimated_minutes, tags
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 telegram_message_id,
+                user_id,
                 verbatim_input,
                 item_type,
                 title,
@@ -394,12 +469,17 @@ async def delete_item(item_id: int) -> bool:
 async def get_items_filtered(
     status: Optional[str] = None,
     item_type: Optional[str] = None,
-    limit: int = 50
+    limit: int = 50,
+    user_id: Optional[int] = None
 ) -> List[Dict[str, Any]]:
-    """Get items filtered by status and type."""
+    """Get items filtered by status, type, and user."""
     async with get_db() as db:
         query = "SELECT * FROM items WHERE 1=1"
         params = []
+
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
 
         if status:
             query += " AND status = ?"
@@ -442,15 +522,21 @@ async def get_items_older_than(days: int, status: str = 'pending') -> List[Dict[
         return [row_to_dict(row) for row in rows]
 
 
-async def get_pending_items_for_picks(limit: int = 50) -> List[Dict[str, Any]]:
+async def get_pending_items_for_picks(limit: int = 50, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get pending items formatted for daily picks generation."""
     async with get_db() as db:
-        cursor = await db.execute(
-            """SELECT id, item_type, title, estimated_minutes, priority, created_at
-               FROM items WHERE status = 'pending'
-               ORDER BY priority DESC, created_at ASC LIMIT ?""",
-            (limit,)
-        )
+        query = """SELECT id, item_type, title, estimated_minutes, priority, created_at
+               FROM items WHERE status = 'pending'"""
+        params = []
+
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
+
+        query += " ORDER BY priority DESC, created_at ASC LIMIT ?"
+        params.append(limit)
+
+        cursor = await db.execute(query, params)
         rows = await cursor.fetchall()
 
         items = []
@@ -465,12 +551,17 @@ async def get_pending_items_for_picks(limit: int = 50) -> List[Dict[str, Any]]:
 
 # Daily picks operations
 
-async def get_daily_picks_for_date(date: str) -> Optional[Dict[str, Any]]:
-    """Get daily picks for a specific date."""
+async def get_daily_picks_for_date(date: str, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """Get daily picks for a specific date and user."""
     async with get_db() as db:
-        cursor = await db.execute(
-            "SELECT * FROM daily_picks WHERE date = ?", (date,)
-        )
+        if user_id is not None:
+            cursor = await db.execute(
+                "SELECT * FROM daily_picks WHERE date = ? AND user_id = ?", (date, user_id)
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT * FROM daily_picks WHERE date = ? AND user_id IS NULL", (date,)
+            )
         row = await cursor.fetchone()
 
         if not row:
@@ -485,15 +576,15 @@ async def get_daily_picks_for_date(date: str) -> Optional[Dict[str, Any]]:
         return d
 
 
-async def save_daily_picks(date: str, picks: List[Dict], total_time: int = 0, message: str = ''):
-    """Save daily picks for a date."""
+async def save_daily_picks(date: str, picks: List[Dict], total_time: int = 0, message: str = '', user_id: Optional[int] = None):
+    """Save daily picks for a date and user."""
     async with get_db() as db:
         await db.execute(
-            """INSERT INTO daily_picks (date, picks_json, total_estimated_time, message)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT(date) DO UPDATE SET
+            """INSERT INTO daily_picks (user_id, date, picks_json, total_estimated_time, message)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, date) DO UPDATE SET
                picks_json = ?, total_estimated_time = ?, message = ?""",
-            (date, json.dumps(picks), total_time, message,
+            (user_id, date, json.dumps(picks), total_time, message,
              json.dumps(picks), total_time, message)
         )
         await db.commit()
@@ -536,20 +627,36 @@ async def update_daily_stats(action: str):
         await db.commit()
 
 
-async def get_user_stats() -> Dict[str, Any]:
+async def get_user_stats(user_id: Optional[int] = None) -> Dict[str, Any]:
     """Get aggregated user statistics."""
     async with get_db() as db:
+        # Build user filter
+        user_filter = ""
+        user_params = []
+        if user_id is not None:
+            user_filter = " WHERE user_id = ?"
+            user_params = [user_id]
+
         # Total counts
-        cursor = await db.execute("SELECT COUNT(*) as count FROM items")
+        cursor = await db.execute(f"SELECT COUNT(*) as count FROM items{user_filter}", user_params)
         total_captured = (await cursor.fetchone())['count']
 
-        cursor = await db.execute("SELECT COUNT(*) as count FROM items WHERE status = 'consumed'")
+        cursor = await db.execute(
+            f"SELECT COUNT(*) as count FROM items WHERE status = 'consumed'{' AND user_id = ?' if user_id is not None else ''}",
+            user_params
+        )
         total_consumed = (await cursor.fetchone())['count']
 
-        cursor = await db.execute("SELECT COUNT(*) as count FROM items WHERE status = 'pending'")
+        cursor = await db.execute(
+            f"SELECT COUNT(*) as count FROM items WHERE status = 'pending'{' AND user_id = ?' if user_id is not None else ''}",
+            user_params
+        )
         pending = (await cursor.fetchone())['count']
 
-        cursor = await db.execute("SELECT COUNT(*) as count FROM items WHERE status = 'archived'")
+        cursor = await db.execute(
+            f"SELECT COUNT(*) as count FROM items WHERE status = 'archived'{' AND user_id = ?' if user_id is not None else ''}",
+            user_params
+        )
         archived = (await cursor.fetchone())['count']
 
         # Calculate streak
@@ -701,7 +808,8 @@ async def search_items(
     query: str,
     status: Optional[str] = None,
     item_type: Optional[str] = None,
-    limit: int = 50
+    limit: int = 50,
+    user_id: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """
     Full-text search across all item fields with prefix matching.
@@ -711,6 +819,7 @@ async def search_items(
         status: Optional filter by status
         item_type: Optional filter by item type
         limit: Maximum results to return
+        user_id: Optional filter by user
 
     Returns:
         List of matching items with search rank
@@ -728,6 +837,10 @@ async def search_items(
             WHERE items_fts MATCH ?
         """
         params = [fts_query]
+
+        if user_id is not None:
+            sql += " AND items.user_id = ?"
+            params.append(user_id)
 
         if status:
             sql += " AND items.status = ?"
@@ -753,7 +866,7 @@ async def search_items(
         return results
 
 
-async def search_suggestions(query: str, limit: int = 8) -> List[Dict[str, Any]]:
+async def search_suggestions(query: str, limit: int = 8, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Get search suggestions for autocomplete.
     Returns matching titles and snippets from descriptions.
@@ -776,12 +889,18 @@ async def search_suggestions(query: str, limit: int = 8) -> List[Dict[str, Any]]
             FROM items
             INNER JOIN items_fts ON items.id = items_fts.rowid
             WHERE items_fts MATCH ?
-            ORDER BY search_rank
-            LIMIT ?
         """
+        params = [fts_query]
+
+        if user_id is not None:
+            sql += " AND items.user_id = ?"
+            params.append(user_id)
+
+        sql += " ORDER BY search_rank LIMIT ?"
+        params.append(limit)
 
         try:
-            cursor = await db.execute(sql, [fts_query, limit])
+            cursor = await db.execute(sql, params)
             rows = await cursor.fetchall()
 
             suggestions = []
@@ -802,7 +921,8 @@ async def search_items_simple(
     query: str,
     status: Optional[str] = None,
     item_type: Optional[str] = None,
-    limit: int = 50
+    limit: int = 50,
+    user_id: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """
     Simple LIKE-based search fallback if FTS fails.
@@ -823,6 +943,10 @@ async def search_items_simple(
             )
         """
         params = [search_pattern] * 6
+
+        if user_id is not None:
+            sql += " AND user_id = ?"
+            params.append(user_id)
 
         if status:
             sql += " AND status = ?"

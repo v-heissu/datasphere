@@ -179,7 +179,7 @@
 	}
 
 	.card {
-		@apply rounded-2xl overflow-hidden transition-all duration-300;
+		@apply rounded-2xl overflow-hidden transition-all duration-300 relative;
 		background: var(--bg-secondary);
 		border: 1px solid var(--border);
 	}

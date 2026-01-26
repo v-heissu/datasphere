@@ -135,32 +135,31 @@ L'utente ti ha inviato un'IMMAGINE (es. screenshot, foto, copertina).
 {caption_context}
 
 TASK:
-1. ANALIZZA l'immagine per capire cosa rappresenta
-2. Se contiene testo (screenshot, articolo, post), estrai il contenuto principale
-3. Se è un'immagine di un prodotto/media (copertina libro, poster film, album), identificalo
-4. CERCA SU WEB per trovare informazioni aggiuntive se necessario
-5. Classifica e arricchisci come faresti con un pensiero testuale
+1. IDENTIFICA il contenuto: cosa rappresenta? (film, libro, concetto, prodotto, etc.)
+2. Se contiene testo (screenshot, articolo), estrai il contenuto principale
+3. CERCA SU WEB per trovare informazioni aggiuntive se necessario
+4. Classifica e arricchisci
 
 OUTPUT (SOLO JSON, NO markdown, NO testo aggiuntivo):
 {{
   "type": "film|book|concept|music|art|todo|other",
-  "title": "titolo identificato o descrizione breve",
-  "description": "cosa rappresenta l'immagine e info trovate (2-3 frasi)",
+  "title": "titolo identificato o concetto chiave",
+  "description": "info sul contenuto: di cosa parla, perché è interessante, contesto (2-3 frasi dirette, NO 'l'immagine mostra...')",
   "links": [
     {{"url": "link reale trovato", "type": "imdb|spotify|wikipedia|bandcamp|..."}}
   ],
   "estimated_minutes": 30,
   "priority": 3,
   "tags": ["tag1", "tag2", "tag3"],
-  "consumption_suggestion": "quando/come consumarlo",
-  "image_analysis": "breve descrizione di cosa mostra l'immagine"
+  "consumption_suggestion": "quando/come consumarlo"
 }}
 
 REGOLE CRITICHE:
-- Se è uno screenshot con testo, estrai il contenuto rilevante
-- Se è una copertina/poster, identifica il media
-- USA web search per arricchire con info reali
-- Se non riesci a identificare → type: "other", description: "Immagine non identificata"
+- RISPONDI AL CONTENUTO, non all'immagine: descrivi IL FILM, IL LIBRO, IL CONCETTO - non "l'immagine mostra un film..."
+- Se è uno screenshot con testo, estrai e riassumi il concetto
+- Se è una copertina/poster, identifica il media e descrivilo
+- USA web search per arricchire con info reali (trama, autore, anno, etc.)
+- Se non riesci a identificare → type: "other", title: concetto generico
 - RISPONDI SOLO CON JSON PURO
 """
 
@@ -399,7 +398,7 @@ async def generate_picks_with_claude(prompt: str) -> Optional[Dict]:
         return None
 
 
-async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Dict[str, Any]:
+async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None, user_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Classifica e arricchisce un pensiero usando l'LLM configurato.
     """
@@ -456,7 +455,8 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
             },
             priority=result['priority'],
             estimated_minutes=result['estimated_minutes'],
-            tags=result['tags']
+            tags=result['tags'],
+            user_id=user_id
         )
 
         result['id'] = item_id
@@ -465,14 +465,15 @@ async def classify_and_enrich(verbatim: str, msg_id: Optional[int] = None) -> Di
 
     except Exception as e:
         logger.error(f"Error classifying thought: {e}", exc_info=True)
-        return await create_fallback_result(verbatim, msg_id)
+        return await create_fallback_result(verbatim, msg_id, user_id)
 
 
 async def classify_and_enrich_image(
     image_bytes: bytes,
     mime_type: str,
     caption: Optional[str] = None,
-    msg_id: Optional[int] = None
+    msg_id: Optional[int] = None,
+    user_id: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Classifica e arricchisce un'immagine usando Gemini multimodale.
@@ -481,7 +482,7 @@ async def classify_and_enrich_image(
 
     if not gemini_client:
         logger.error("Gemini not initialized - image classification requires Gemini")
-        return await create_image_fallback_result(caption, msg_id)
+        return await create_image_fallback_result(caption, msg_id, user_id)
 
     try:
         # Get context
@@ -511,8 +512,8 @@ async def classify_and_enrich_image(
         # Validate and normalize result
         result = normalize_classification(result)
 
-        # Build verbatim from caption or image analysis
-        verbatim = caption if caption else f"[Immagine: {result.get('image_analysis', 'analisi non disponibile')}]"
+        # Build verbatim from caption or title
+        verbatim = caption if caption else f"[Immagine: {result.get('title', 'contenuto non identificato')}]"
 
         # Save to database
         item_id = await save_item(
@@ -523,12 +524,12 @@ async def classify_and_enrich_image(
             description=result['description'],
             enrichment={
                 'links': result['links'],
-                'consumption_suggestion': result['consumption_suggestion'],
-                'image_analysis': result.get('image_analysis', '')
+                'consumption_suggestion': result['consumption_suggestion']
             },
             priority=result['priority'],
             estimated_minutes=result['estimated_minutes'],
-            tags=result['tags']
+            tags=result['tags'],
+            user_id=user_id
         )
 
         result['id'] = item_id
@@ -537,10 +538,10 @@ async def classify_and_enrich_image(
 
     except Exception as e:
         logger.error(f"Error classifying image: {e}", exc_info=True)
-        return await create_image_fallback_result(caption, msg_id)
+        return await create_image_fallback_result(caption, msg_id, user_id)
 
 
-async def create_image_fallback_result(caption: Optional[str], msg_id: Optional[int] = None) -> Dict[str, Any]:
+async def create_image_fallback_result(caption: Optional[str], msg_id: Optional[int] = None, user_id: Optional[int] = None) -> Dict[str, Any]:
     """Create fallback result when image classification fails."""
     logger.warning("Creating fallback for image")
 
@@ -571,7 +572,8 @@ async def create_image_fallback_result(caption: Optional[str], msg_id: Optional[
         },
         priority=result['priority'],
         estimated_minutes=result['estimated_minutes'],
-        tags=result['tags']
+        tags=result['tags'],
+        user_id=user_id
     )
 
     result['id'] = item_id
@@ -594,10 +596,10 @@ def normalize_classification(result: Dict) -> Dict:
     }
 
 
-async def create_fallback_result(verbatim: str, msg_id: Optional[int] = None) -> Dict[str, Any]:
+async def create_fallback_result(verbatim: str, msg_id: Optional[int] = None, user_id: Optional[int] = None) -> Dict[str, Any]:
     """Create fallback result when classification fails."""
     logger.warning(f"Creating fallback for: {verbatim[:50]}")
-    
+
     result = {
         'type': 'other',
         'title': verbatim[:50] + ('...' if len(verbatim) > 50 else ''),
@@ -622,17 +624,18 @@ async def create_fallback_result(verbatim: str, msg_id: Optional[int] = None) ->
         },
         priority=result['priority'],
         estimated_minutes=result['estimated_minutes'],
-        tags=result['tags']
+        tags=result['tags'],
+        user_id=user_id
     )
 
     result['id'] = item_id
     return result
 
 
-async def generate_daily_picks() -> Optional[Dict[str, Any]]:
-    """Genera suggerimenti giornalieri."""
-    logger.info(f"Generating daily picks with {LLM_PROVIDER}")
-    
+async def generate_daily_picks(user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """Genera suggerimenti giornalieri per un utente."""
+    logger.info(f"Generating daily picks with {LLM_PROVIDER} for user {user_id}")
+
     if LLM_PROVIDER == "gemini" and not gemini_client:
         logger.error("Gemini not initialized")
         return None
@@ -642,7 +645,7 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
 
     try:
         user_background = await get_config('user_background', '')
-        pending_items = await get_pending_items_for_picks(limit=50)
+        pending_items = await get_pending_items_for_picks(limit=50, user_id=user_id)
 
         if not pending_items:
             logger.info("No pending items for daily picks")
@@ -675,6 +678,9 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
         for pick in result.get('picks', []):
             item = await get_item_by_id(pick.get('item_id'))
             if item and item['status'] == 'pending':
+                # Verify item belongs to user
+                if user_id is not None and item.get('user_id') != user_id:
+                    continue
                 valid_picks.append({
                     'item_id': pick['item_id'],
                     'reason': pick.get('reason', ''),
@@ -691,10 +697,11 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
             date=today,
             picks=[{'item_id': p['item_id'], 'reason': p['reason']} for p in valid_picks],
             total_time=total_time,
-            message=result.get('message', '')
+            message=result.get('message', ''),
+            user_id=user_id
         )
 
-        logger.info(f"Generated {len(valid_picks)} picks for {today}")
+        logger.info(f"Generated {len(valid_picks)} picks for {today} user {user_id}")
         return {
             'date': today,
             'picks': valid_picks,
@@ -707,11 +714,11 @@ async def generate_daily_picks() -> Optional[Dict[str, Any]]:
         return None
 
 
-async def get_daily_picks_with_items(date: str) -> Optional[Dict[str, Any]]:
-    """Get daily picks with full item details."""
+async def get_daily_picks_with_items(date: str, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """Get daily picks with full item details for a user."""
     from database import get_daily_picks_for_date
 
-    picks_data = await get_daily_picks_for_date(date)
+    picks_data = await get_daily_picks_for_date(date, user_id=user_id)
     if not picks_data:
         return None
 

@@ -1,11 +1,12 @@
 <script>
 	import { createEventDispatcher } from 'svelte';
-	import { ExternalLink, Check, Archive, Clock, ChevronDown, ChevronUp, Trash2, RotateCcw, Copy, CheckCircle2 } from 'lucide-svelte';
+	import { ExternalLink, Check, Archive, Clock, ChevronDown, ChevronUp, Trash2, RotateCcw, Copy, CheckCircle2, Maximize2, Minimize2 } from 'lucide-svelte';
 
 	export let item;
 
 	const dispatch = createEventDispatcher();
 	let copied = false;
+	let expanded = false;
 
 	const typeLabel = {
 		film: 'Film',
@@ -83,77 +84,116 @@
 		}
 	}
 
+	function toggleExpand(e) {
+		// Don't toggle if clicking on buttons or links
+		if (e.target.closest('button') || e.target.closest('a')) return;
+		expanded = !expanded;
+	}
+
 	$: daysAgo = getDaysAgo(item.created_at);
 	$: links = item.enrichment?.links || [];
 	$: itemType = item.item_type || 'other';
 </script>
 
-<div class="card type-{itemType} animate-fade-in group">
-	<div class="p-5">
-		<!-- Header -->
-		<div class="flex items-start justify-between gap-4 mb-4">
-			<div class="flex-1 min-w-0">
-				<div class="flex items-center gap-2 mb-2">
-					<span class="text-lg">{typeIcon[itemType] || typeIcon.other}</span>
-					<span class="text-xs font-semibold uppercase tracking-wider opacity-70">
-						{typeLabel[itemType] || typeLabel.other}
-					</span>
-					{#if daysAgo > 7}
-						<span class="text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 font-medium">
-							{daysAgo}g fa
+<div class="card type-{itemType} animate-fade-in group {expanded ? 'ring-2 ring-[var(--accent)]/50' : ''}">
+	<div class="p-4 sm:p-5">
+		<!-- Tap to expand indicator (mobile only) -->
+		<button
+			class="sm:hidden absolute top-2 right-2 p-1.5 rounded-lg bg-white/5 opacity-40 hover:opacity-100 transition-opacity z-10"
+			on:click={() => expanded = !expanded}
+			title={expanded ? 'Riduci' : 'Espandi'}
+		>
+			{#if expanded}
+				<Minimize2 class="w-3.5 h-3.5" />
+			{:else}
+				<Maximize2 class="w-3.5 h-3.5" />
+			{/if}
+		</button>
+
+		<!-- Tappable content area -->
+		<div
+			class="cursor-pointer sm:cursor-default"
+			on:click={toggleExpand}
+			on:keypress={(e) => e.key === 'Enter' && toggleExpand(e)}
+			role="button"
+			tabindex="0"
+		>
+			<!-- Header -->
+			<div class="flex items-start justify-between gap-3 mb-3 pr-8 sm:pr-0">
+				<div class="flex-1 min-w-0">
+					<div class="flex items-center gap-2 mb-1.5">
+						<span class="text-base sm:text-lg">{typeIcon[itemType] || typeIcon.other}</span>
+						<span class="text-xs font-semibold uppercase tracking-wider opacity-70">
+							{typeLabel[itemType] || typeLabel.other}
 						</span>
+						{#if daysAgo > 7}
+							<span class="text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 font-medium">
+								{daysAgo}g fa
+							</span>
+						{/if}
+					</div>
+					<h3 class="font-bold text-base sm:text-lg leading-snug">{item.title || 'Senza titolo'}</h3>
+				</div>
+				<div class="hidden sm:flex items-center gap-1.5 shrink-0">
+					<button
+						class="btn btn-ghost btn-icon btn-sm opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+						title={copied ? 'Copiato!' : 'Copia'}
+						on:click|stopPropagation={copyCard}
+					>
+						{#if copied}
+							<CheckCircle2 class="w-4 h-4 text-[var(--success)]" />
+						{:else}
+							<Copy class="w-4 h-4" />
+						{/if}
+					</button>
+					<div class="flex items-center gap-1 text-xs sm:text-sm opacity-60">
+						<Clock class="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+						<span>{item.estimated_minutes || '?'}min</span>
+					</div>
+				</div>
+			</div>
+
+			<!-- Time badge on mobile -->
+			<div class="sm:hidden flex items-center gap-2 mb-3 text-xs opacity-60">
+				<Clock class="w-3.5 h-3.5" />
+				<span>{item.estimated_minutes || '?'}min</span>
+			</div>
+
+			<!-- Description -->
+			{#if item.description}
+				<p class="text-sm opacity-70 mb-3 leading-relaxed {expanded ? '' : 'line-clamp-3'}">
+					{item.description}
+				</p>
+			{/if}
+
+			<!-- Original query (verbatim) - shown when expanded or on desktop -->
+			{#if item.verbatim_input && (expanded || true)}
+				<p class="{expanded ? 'block' : 'hidden sm:block'} text-xs opacity-40 mb-3 italic border-l-2 border-white/10 pl-3 {expanded ? '' : 'line-clamp-2'}">
+					"{item.verbatim_input}"
+				</p>
+			{/if}
+
+			<!-- Tags -->
+			{#if item.tags && item.tags.length > 0}
+				<div class="flex gap-1.5 mb-3 flex-wrap">
+					{#each expanded ? item.tags : item.tags.slice(0, 4) as tag}
+						<span class="text-xs px-2 py-0.5 rounded-lg bg-white/5 border border-white/10">{tag}</span>
+					{/each}
+					{#if !expanded && item.tags.length > 4}
+						<span class="text-xs px-2 py-0.5 opacity-40">+{item.tags.length - 4}</span>
 					{/if}
 				</div>
-				<h3 class="font-bold text-lg leading-tight">{item.title || 'Senza titolo'}</h3>
-			</div>
-			<div class="flex items-center gap-2 shrink-0">
-				<button
-					class="btn btn-ghost btn-icon opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
-					title={copied ? 'Copiato!' : 'Copia'}
-					on:click={copyCard}
-				>
-					{#if copied}
-						<CheckCircle2 class="w-4 h-4 text-[var(--success)]" />
-					{:else}
-						<Copy class="w-4 h-4" />
-					{/if}
-				</button>
-				<div class="flex items-center gap-1.5 text-sm opacity-60">
-					<Clock class="w-4 h-4" />
-					<span>{item.estimated_minutes || '?'}min</span>
-				</div>
-			</div>
+			{/if}
 		</div>
 
-		<!-- Description -->
-		{#if item.description}
-			<p class="text-sm opacity-70 mb-4 leading-relaxed">{item.description}</p>
-		{/if}
-
-		<!-- Original query (verbatim) -->
-		{#if item.verbatim_input}
-			<p class="text-xs opacity-40 mb-4 italic border-l-2 border-white/10 pl-3">
-				"{item.verbatim_input}"
-			</p>
-		{/if}
-
-		<!-- Tags -->
-		{#if item.tags && item.tags.length > 0}
-			<div class="flex gap-1.5 mb-4 flex-wrap">
-				{#each item.tags as tag}
-					<span class="text-xs px-2 py-1 rounded-lg bg-white/5 border border-white/10">{tag}</span>
-				{/each}
-			</div>
-		{/if}
-
-		<!-- Links (collapsible) -->
+		<!-- Links (collapsible) - always show when expanded -->
 		{#if links.length > 0}
 			<div class="mb-4">
 				<button
 					class="text-xs opacity-60 hover:opacity-100 flex items-center gap-1 transition-opacity"
 					on:click={() => (showDetails = !showDetails)}
 				>
-					{#if showDetails}
+					{#if showDetails || expanded}
 						<ChevronUp class="w-3 h-3" />
 					{:else}
 						<ChevronDown class="w-3 h-3" />
@@ -161,7 +201,7 @@
 					{links.length} link{links.length > 1 ? 's' : ''}
 				</button>
 
-				{#if showDetails}
+				{#if showDetails || expanded}
 					<div class="mt-3 space-y-2 animate-fade-in">
 						{#each links as link}
 							<a
@@ -172,7 +212,7 @@
 							>
 								<ExternalLink class="w-3 h-3 flex-shrink-0 text-[var(--accent)]" />
 								<span class="font-medium text-[var(--accent)]">{link.type}</span>
-								<span class="truncate opacity-60 group-hover/link:opacity-100">{link.url}</span>
+								<span class="{expanded ? '' : 'truncate'} opacity-60 group-hover/link:opacity-100">{link.url}</span>
 							</a>
 						{/each}
 					</div>
